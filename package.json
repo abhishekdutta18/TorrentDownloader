@@ -1,7 +1,7 @@
 {
   "name": "torrent-downloader",
   "private": true,
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "A simple torrent downloader built with Electron, Vite, and React",
   "author": "Abhishek Dutta <abhishek@example.com>",
   "type": "module",
@@ -74,7 +74,15 @@
       "identity": null,
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
+      "category": "public.app-category.utilities",
       "target": [
+        {
+          "target": "pkg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
         {
           "target": "dmg",
           "arch": [

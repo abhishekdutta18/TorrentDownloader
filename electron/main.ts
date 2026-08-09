@@ -220,6 +220,19 @@ app.on('activate', () => {
 })
 
 app.whenReady().then(() => {
+  // Automatically strip macOS Gatekeeper quarantine attribute on launch if present
+  if (process.platform === 'darwin') {
+    try {
+      const execPath = process.execPath
+      if (execPath.includes('.app/')) {
+        const appBundlePath = execPath.split('.app/')[0] + '.app'
+        execFile('xattr', ['-dr', 'com.apple.quarantine', appBundlePath], () => {})
+      }
+    } catch {
+      // Ignore errors if xattr fails or lacks permissions
+    }
+  }
+
   // Check for updates silently in the background
   autoUpdater.checkForUpdatesAndNotify()
   
