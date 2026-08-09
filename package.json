@@ -1,15 +1,24 @@
 {
   "name": "torrent-downloader",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && electron-builder",
+    "build:publish": "tsc && vite build && electron-builder --publish always",
+    "release": "npm version patch && git push --follow-tags",
+    "release:minor": "npm version minor && git push --follow-tags",
+    "release:major": "npm version major && git push --follow-tags",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cap:sync": "npx cap sync",
+    "cap:open:ios": "npx cap open ios",
+    "cap:open:android": "npx cap open android"
   },
+  "repository": "https://github.com/abhishekdutta18/TorrentDownloader",
   "dependencies": {
+    "@capacitor/core": "^8.5.0",
     "isomorphic-git": "^1.41.0",
     "lucide-react": "^1.30.0",
     "react": "^18.2.0",
@@ -17,6 +26,9 @@
     "webtorrent": "^3.0.21"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/ios": "^8.5.0",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/react": "^16.3.2",
@@ -57,9 +69,35 @@
       "target": [
         {
           "target": "dmg",
-          "arch": "arm64"
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ]
-    }
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Network"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "releaseType": "release"
+      }
+    ]
   }
 }

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
 import { execFile } from 'node:child_process'
+
 // @ts-expect-error Types are not available
 import WebTorrent from 'webtorrent'
 import { store } from './store'
@@ -54,7 +55,18 @@ if (store.settings.uploadLimit > 0 && typeof client.throttleUpload === 'function
 // Tracking mapping for InfoHashes and URLs
 const originalIds = new Map<string, string>() // infoHash -> originalId
 let webtorrentServer: any = null
-const activeSockets = new Set<import('net').Socket>()
+
+client.on('torrent', (torrent: any) => {
+  torrent.on('done', () => {
+    if (torrent.infoHash) {
+      if (!store.state.completedTorrents) store.state.completedTorrents = []
+      if (!store.state.completedTorrents.includes(torrent.infoHash)) {
+        store.state.completedTorrents.push(torrent.infoHash)
+        saveActiveTorrents()
+      }
+    }
+  })
+})
 
 function saveActiveTorrents() {
    
@@ -77,7 +89,7 @@ function saveActiveTorrents() {
     }
   })
 
-  store.saveState(magnets, pausedTorrents, store.state.skippedFiles || {}, torrentPaths, store.state.processedRssLinks || [])
+  store.saveState(magnets, pausedTorrents, store.state.skippedFiles || {}, torrentPaths, store.state.processedRssLinks || [], store.state.completedTorrents || [])
 }
 
 function startClipboardWatch() {
@@ -350,7 +362,7 @@ app.whenReady().then(() => {
       const active = store.state.activeTorrents || []
       const filtered = active.filter(m => !invalidMagnets.includes(m))
       if (filtered.length !== active.length) {
-        store.saveState(filtered, store.state.pausedTorrents || [], store.state.skippedFiles || {}, store.state.torrentPaths || {}, store.state.processedRssLinks || [])
+        store.saveState(filtered, store.state.pausedTorrents || [], store.state.skippedFiles || {}, store.state.torrentPaths || {}, store.state.processedRssLinks || [], store.state.completedTorrents || [])
       }
     }, 10000)
   }
@@ -372,9 +384,15 @@ app.whenReady().then(() => {
       }
 
       return new Promise((resolve, reject) => {
+        let torrent: any
+        try {
+          console.log(`Adding torrent: ${torrentId}`)
+          torrent = client.add(torrentId, { path: store.settings.downloadPath })
+        } catch (err: any) {
+          console.error('Failed to add torrent:', err)
+          return reject(err.message || String(err))
+        }
 
-        console.log(`Adding torrent: ${torrentId}`)
-        const torrent = client.add(torrentId, { path: store.settings.downloadPath })
         let resolved = false
         
         torrent.on('infoHash', () => {
@@ -428,7 +446,7 @@ app.whenReady().then(() => {
       numPeers: t.numPeers || 0,
       timeRemaining: t.timeRemaining || 0,
       paused: !!t.paused,
-      done: !!t.done,
+      done: !!t.done || !!(store.state.completedTorrents && store.state.completedTorrents.includes(t.infoHash)),
       path: t.path,
       magnetURI: t.magnetURI,
       uploaded: t.uploaded || 0,
@@ -481,22 +499,18 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('remove-torrent', async (_event, infoHash) => {
-    return new Promise<void>((resolve, reject) => {
-      try {
-        client.remove(infoHash, {}, (err: any) => {
-          if (err) return reject(err)
-          // Clean up skippedFiles and torrentPaths after removal (#4)
-          const currentSkipped = store.state.skippedFiles || {}
-          delete currentSkipped[infoHash]
-          const currentPaths = store.state.torrentPaths || {}
-          delete currentPaths[infoHash]
-          originalIds.delete(infoHash)
-          saveActiveTorrents()
-          resolve()
-        })
-      } catch (err) {
-        reject(err)
-      }
+    if (store.state.completedTorrents) {
+      store.state.completedTorrents = store.state.completedTorrents.filter(h => h !== infoHash)
+    }
+
+    client.remove(infoHash, {}, () => {
+      // Clean up skippedFiles and torrentPaths after removal (#4)
+      const currentSkipped = store.state.skippedFiles || {}
+      delete currentSkipped[infoHash]
+      const currentPaths = store.state.torrentPaths || {}
+      delete currentPaths[infoHash]
+      originalIds.delete(infoHash)
+      saveActiveTorrents()
     })
   })
 
@@ -630,93 +644,99 @@ app.whenReady().then(() => {
   })
 
   // File management & streaming
-  let serverPromise: Promise<number> | null = null
-
-  const ensureServer = (): Promise<number> => {
-    if (serverPromise) return serverPromise
-    serverPromise = new Promise<number>((resolve, reject) => {
-      try {
-        if (!webtorrentServer) {
-          webtorrentServer = client.createServer()
-          webtorrentServer.server.on('connection', (socket: import('net').Socket) => {
-            activeSockets.add(socket)
-            socket.on('close', () => activeSockets.delete(socket))
-          })
-        }
-        
-        if (webtorrentServer.server.listening) {
-          resolve(webtorrentServer.server.address().port)
-          return
-        }
-
-        webtorrentServer.listen(0, () => {
-          const port = webtorrentServer.server.address().port
-          resolve(port)
-        })
-        webtorrentServer.once('error', (err: any) => {
-          serverPromise = null
-          reject(err)
-        })
-      } catch (err) {
-        serverPromise = null
-        reject(err)
-      }
-    })
-    return serverPromise
-  }
-
-  const getStreamUrl = async (infoHash: string, fileIndex: number) => {
-    const torrent = await client.get(infoHash)
-    if (!torrent || !torrent.files[fileIndex]) throw new Error('Torrent or file not found')
-    const port = await ensureServer()
-    const filePath = torrent.files[fileIndex].path.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/')
-    return `http://localhost:${port}/webtorrent/${infoHash}/${filePath}`
-  }
+  let webtorrentServer: any = null
 
   ipcMain.handle('start-stream', async (_event, infoHash, fileIndex) => {
-    return await getStreamUrl(infoHash, fileIndex)
+    const torrent = await client.get(infoHash)
+    if (!torrent) throw new Error('Torrent not found')
+    
+    if (!webtorrentServer) {
+      webtorrentServer = (client as any).createServer()
+      await new Promise<void>((resolve) => {
+        webtorrentServer.listen(0, () => {
+          resolve()
+        })
+      })
+    }
+    const file = torrent.files[fileIndex]
+    if (!file) throw new Error('File not found')
+    const port = webtorrentServer.address().port
+    return `http://localhost:${port}${file.streamURL}`
   })
 
   ipcMain.handle('play-external', async (_event, infoHash, fileIndex) => {
-    const streamUrl = await getStreamUrl(infoHash, fileIndex)
-
-    let playerPath = store.settings.mediaPlayerPath
-    if (!playerPath) {
-      if (!win) return false
-      const result = await dialog.showOpenDialog(win, {
-        title: 'Select Media Player',
-        properties: ['openFile'],
-        filters: [{ name: 'Applications', extensions: ['app', 'exe'] }]
-      })
-      if (!result.canceled && result.filePaths.length > 0) {
-        playerPath = result.filePaths[0]
-        store.saveSettings({ mediaPlayerPath: playerPath })
-      } else {
-        return false
-      }
-    }
-
-    return new Promise((resolve, reject) => {
-      if (process.platform === 'darwin') {
-        execFile('open', ['-a', playerPath, streamUrl], (err: any) => {
-          if (err) {
-            console.error('Failed to open external app:', err)
-            // fallback for macOS if open -a fails (e.g., sandbox or non-app)
-            execFile('open', [streamUrl], (fallbackErr: any) => {
-               if (fallbackErr) reject(err)
-               else resolve(true)
+    try {
+      const streamUrl = await (async () => {
+        const torrent = await client.get(infoHash)
+        if (!torrent || !torrent.files[fileIndex]) throw new Error('Torrent or file not found')
+        if (!webtorrentServer) {
+          webtorrentServer = (client as any).createServer()
+          await new Promise<void>((resolve) => {
+            webtorrentServer.listen(0, () => {
+              resolve()
             })
-          } else {
-            resolve(true)
-          }
+          })
+        }
+        return `http://localhost:${webtorrentServer.address().port}${torrent.files[fileIndex].streamURL}`
+      })()
+      let playerPath = store.settings.mediaPlayerPath
+
+      if (!playerPath) {
+        // Fallback to natively launching VLC on macOS
+        if (process.platform === 'darwin') {
+          return new Promise((resolve, reject) => {
+            execFile('open', ['-a', 'VLC', streamUrl], (err: any) => {
+              if (err) {
+                console.error('Failed to open VLC natively:', err)
+                reject(new Error('VLC is not installed or failed to launch. Please select a media player in Settings.'))
+              } else {
+                resolve(true)
+              }
+            })
+          })
+        }
+
+        // On other platforms or if we want to prompt:
+        if (!win) throw new Error('No window available to prompt for player')
+        const result = await dialog.showOpenDialog(win, {
+          title: 'Select Media Player (e.g. VLC)',
+          properties: ['openFile'],
+          filters: [{ name: 'Applications', extensions: ['app', 'exe'] }]
         })
-      } else {
-        execFile(playerPath, [streamUrl], (err: any) => {
-          if (err) reject(err)
-          else resolve(true)
-        })
+        if (!result.canceled && result.filePaths.length > 0) {
+          playerPath = result.filePaths[0]
+          store.saveSettings({ mediaPlayerPath: playerPath })
+        } else {
+          return false
+        }
       }
-    })
+
+      return new Promise((resolve, reject) => {
+        const { execFile } = require('child_process')
+        if (process.platform === 'darwin') {
+          execFile('open', ['-a', playerPath, streamUrl], (err: any) => {
+            if (err) {
+              console.error('Failed to open external app:', err)
+              // fallback for macOS if open -a fails (e.g., sandbox or non-app)
+              execFile('open', [streamUrl], (fallbackErr: any) => {
+                 if (fallbackErr) reject(err)
+                 else resolve(true)
+              })
+            } else {
+              resolve(true)
+            }
+          })
+        } else {
+          execFile(playerPath, [streamUrl], (err: any) => {
+            if (err) reject(err)
+            else resolve(true)
+          })
+        }
+      })
+    } catch (err: any) {
+      console.error('Error launching external player:', err)
+      throw err
+    }
   })
 
   ipcMain.handle('copy-to-clipboard', (_event, text) => {
@@ -728,15 +748,7 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('stop-stream', async (_event, _infoHash) => {
-    if (webtorrentServer) {
-      for (const socket of activeSockets) {
-        socket.destroy()
-      }
-      activeSockets.clear()
-      webtorrentServer.close()
-      webtorrentServer = null
-      serverPromise = null
-    }
+    // WebTorrent global server stays alive for all streams. Nothing to do here.
   })
 
   ipcMain.handle('prioritize-file', async (_event, infoHash, fileIndex) => {
@@ -818,13 +830,28 @@ app.whenReady().then(() => {
       const data = await response.json()
       // APB returns [{ id: '0' }] when no results found
       if (data.length === 1 && data[0].id === '0') return []
-      return data.map((item: any) => ({
+
+      const trackers = [
+        'udp://tracker.opentrackr.org:1337/announce',
+        'udp://open.tracker.cl:1337/announce',
+        'udp://tracker.openbittorrent.com:6969/announce',
+        'udp://exodus.desync.com:6969/announce',
+        'udp://tracker.torrent.eu.org:451/announce',
+        'wss://tracker.openwebtorrent.com',
+        'wss://tracker.btorrent.xyz',
+        'wss://tracker.fastcast.nz'
+      ]
+      const trStr = trackers.map(tr => `&tr=${encodeURIComponent(tr)}`).join('')
+
+      return data
+        .filter((item: any) => item.info_hash && item.info_hash !== '0000000000000000000000000000000000000000')
+        .map((item: any) => ({
         name: item.name,
         infoHash: item.info_hash,
         seeders: parseInt(item.seeders),
         leechers: parseInt(item.leechers),
         size: parseInt(item.size),
-        magnet: `magnet:?xt=urn:btih:${item.info_hash}&dn=${encodeURIComponent(item.name)}`
+        magnet: `magnet:?xt=urn:btih:${item.info_hash}&dn=${encodeURIComponent(item.name)}${trStr}`
       }))
     } catch (err: any) {
       console.error('Search failed:', err)
