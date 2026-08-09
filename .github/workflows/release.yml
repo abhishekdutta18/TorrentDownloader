@@ -40,16 +40,14 @@ jobs:
         run: npm install
 
       - name: Generate Icon
-        shell: bash
         run: |
-          mkdir -p build
-          base64 --decode < scripts/icon-base64.txt > build/icon.png
+          node -e "const fs = require('fs'); fs.mkdirSync('build', { recursive: true }); const b64 = fs.readFileSync('scripts/icon-base64.txt', 'utf8').trim(); fs.writeFileSync('build/icon.png', Buffer.from(b64, 'base64'));"
 
       - name: Generate Windows Icon
         if: matrix.os == 'windows-latest'
         run: |
           npm i -g png-to-ico
-          png-to-ico build/icon.png > build/icon.ico
+          node -e "const pngToIco = require('png-to-ico'); pngToIco('build/icon.png').then(buf => require('fs').writeFileSync('build/icon.ico', buf));"
 
       - name: Build and Publish Release
         run: npm run build:publish
