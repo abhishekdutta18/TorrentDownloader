@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import { execFile } from 'node:child_process'
 
 // @ts-expect-error Types are not available
-import WebTorrent from 'webtorrent'
+const WebTorrent = (await import(/* @vite-ignore */ 'webtorrent')).default
 import { store } from './store'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -222,6 +222,11 @@ app.on('activate', () => {
 app.whenReady().then(() => {
   // Check for updates silently in the background
   autoUpdater.checkForUpdatesAndNotify()
+  
+  // Force update the desktop app automatically when downloaded
+  autoUpdater.on('update-downloaded', () => {
+    autoUpdater.quitAndInstall(true, true)
+  })
 
   createWindow()
 

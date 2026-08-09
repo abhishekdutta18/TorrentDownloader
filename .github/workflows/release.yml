@@ -18,10 +18,10 @@ jobs:
 
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Install Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v4
         with:
           node-version: '20.x'
           cache: 'npm'
@@ -44,6 +44,12 @@ jobs:
         run: |
           mkdir -p build
           base64 --decode < scripts/icon-base64.txt > build/icon.png
+
+      - name: Generate Windows Icon
+        if: matrix.os == 'windows-latest'
+        run: |
+          npm i -g png-to-ico
+          png-to-ico build/icon.png > build/icon.ico
 
       - name: Build and Publish Release
         run: npm run build:publish
