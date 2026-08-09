@@ -1,7 +1,7 @@
 {
   "name": "torrent-downloader",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "A simple torrent downloader built with Electron, Vite, and React",
   "author": "Abhishek Dutta <abhishek@example.com>",
   "type": "module",
@@ -107,6 +107,6 @@
   },
   "overrides": {
     "uuid": "^11.1.1",
-    "ip": "npm:ip-sub@^1.9.0"
+    "ip": "^2.0.1"
   }
 }
