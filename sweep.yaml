@@ -1,0 +1,29 @@
+# Sweep AI Configuration File
+# This configures Sweep to automatically resolve GitHub Issues and fix GitHub Actions (GHA) failures.
+
+# The branch that Sweep will develop from and make pull requests to.
+branch: 'main'
+
+# Rules that Sweep will check for (e.g., in new commits)
+rules:
+  - "Code should be properly formatted and follow standard TypeScript conventions."
+  - "There should be no unused imports or variables."
+  - "Ensure no sensitive credentials or API keys are hardcoded."
+
+# Enable reading logs from your existing GitHub Actions to automatically fix build/test failures.
+gha_enabled: True
+
+# Project description to help Sweep understand your codebase.
+description: 'This is a desktop Torrent Downloader application built with Electron, Vite, TypeScript, and React. It uses WebTorrent for handling torrents.'
+
+# Directories Sweep should not edit
+blocked_dirs: 
+  - "dist/"
+  - "dist-electron/"
+  - "release/"
+  - "node_modules/"
+
+# Documentation links to help Sweep understand specific dependencies if needed.
+docs:
+  - WebTorrent: ["https://webtorrent.io/docs"]
+  - Electron: ["https://www.electronjs.org/docs/latest"]

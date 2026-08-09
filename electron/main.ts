@@ -733,7 +733,6 @@ app.whenReady().then(() => {
       }
 
       return new Promise((resolve, reject) => {
-        const { execFile } = require('child_process')
         if (process.platform === 'darwin') {
           execFile('open', ['-a', playerPath, streamUrl], (err: any) => {
             if (err) {
@@ -917,7 +916,7 @@ async function checkRssFeeds() {
         const titleMatch = itemHtml.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) || itemHtml.match(/<title>(.*?)<\/title>/)
         const linkMatch = itemHtml.match(/<link>(.*?)<\/link>/) || itemHtml.match(/<enclosure[^>]+url="([^"]+)"/)
         
-        if (titleMatch && linkMatch) {
+        if (titleMatch && titleMatch[1] && linkMatch && linkMatch[1]) {
           const title = titleMatch[1]
           const link = linkMatch[1]
           
