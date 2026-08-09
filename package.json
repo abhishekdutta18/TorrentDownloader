@@ -14,7 +14,8 @@
     "preview": "vite preview",
     "cap:sync": "npx cap sync",
     "cap:open:ios": "npx cap open ios",
-    "cap:open:android": "npx cap open android"
+    "cap:open:android": "npx cap open android",
+    "deploy": "node ../BlogsPro/blogspro/deploy-worker.js --repo TorrentDownloader --git-changed"
   },
   "repository": "https://github.com/abhishekdutta18/TorrentDownloader",
   "dependencies": {
