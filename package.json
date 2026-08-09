@@ -2,6 +2,8 @@
   "name": "torrent-downloader",
   "private": true,
   "version": "1.0.0",
+  "description": "A simple torrent downloader built with Electron, Vite, and React",
+  "author": "Abhishek Dutta <abhishek@example.com>",
   "type": "module",
   "scripts": {
     "dev": "vite",
