@@ -21,6 +21,7 @@
     "target": [
       "dmg"
     ],
+    "icon": "build/icon.png",
     "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
   },
   "win": {

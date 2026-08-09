@@ -19,6 +19,7 @@ export interface AppState {
   skippedFiles: Record<string, number[]> // infoHash -> array of skipped file indices
   torrentPaths: Record<string, string> // infoHash -> download path
   processedRssLinks: string[] // List of RSS links already downloaded
+  completedTorrents: string[] // Array of infoHashes that are completed
 }
 
 class Store {
@@ -73,6 +74,7 @@ class Store {
       skippedFiles: {},
       torrentPaths: {},
       processedRssLinks: [],
+      completedTorrents: [],
     }
     try {
       if (fs.existsSync(this.statePath)) {
@@ -100,8 +102,8 @@ class Store {
     })
   }
 
-  public saveState(activeTorrents: string[], pausedTorrents: string[], skippedFiles: Record<string, number[]> = {}, torrentPaths: Record<string, string> = {}, processedRssLinks: string[] = []) {
-    this._state = { activeTorrents, pausedTorrents, skippedFiles, torrentPaths, processedRssLinks }
+  public saveState(activeTorrents: string[], pausedTorrents: string[], skippedFiles: Record<string, number[]> = {}, torrentPaths: Record<string, string> = {}, processedRssLinks: string[] = [], completedTorrents: string[] = []) {
+    this._state = { activeTorrents, pausedTorrents, skippedFiles, torrentPaths, processedRssLinks, completedTorrents }
     const data = JSON.stringify(this._state, null, 2)
     const tempPath = this.statePath + '.tmp'
     
