@@ -46,7 +46,6 @@ jobs:
       - name: Generate Windows Icon
         if: matrix.os == 'windows-latest'
         run: |
-          npm i -g png-to-ico
           node -e "const pngToIco = require('png-to-ico'); pngToIco('build/icon.png').then(buf => require('fs').writeFileSync('build/icon.ico', buf));"
 
       - name: Build and Publish Release
