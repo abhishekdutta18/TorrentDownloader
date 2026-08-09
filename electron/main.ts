@@ -1,5 +1,6 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
+ 
 import { app, BrowserWindow, ipcMain, Menu, dialog, MenuItemConstructorOptions, shell, clipboard } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -219,6 +220,9 @@ app.on('activate', () => {
 })
 
 app.whenReady().then(() => {
+  // Check for updates silently in the background
+  autoUpdater.checkForUpdatesAndNotify()
+
   createWindow()
 
   // Setup application menu to enable Copy/Paste on macOS
@@ -644,7 +648,6 @@ app.whenReady().then(() => {
   })
 
   // File management & streaming
-  let webtorrentServer: any = null
 
   ipcMain.handle('start-stream', async (_event, infoHash, fileIndex) => {
     const torrent = await client.get(infoHash)

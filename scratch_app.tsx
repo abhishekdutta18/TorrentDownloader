@@ -1,9 +1,8 @@
  
 import { useEffect, useState, useRef } from 'react'
-import { Play, Pause, Plus, Download, HardDrive, Settings, Activity, FolderOpen, Copy, Terminal, ArrowDown, ArrowUp, Trash2, Ban, MonitorPlay, Link, Square, UploadCloud, ListOrdered, Search, BarChart2, PlayCircle } from 'lucide-react'
+import { Play, Pause, Plus, Download, HardDrive, Settings, Activity, FolderOpen, Copy, Terminal, ArrowDown, ArrowUp, Trash2, Ban, MonitorPlay, Link, Square, UploadCloud, ListOrdered, Search, BarChart2 } from 'lucide-react'
 import './App.css'
 import { Settings as SettingsComponent } from './components/Settings'
-import { VideoPlayer } from './components/VideoPlayer'
 
 interface TorrentFile {
   name: string
@@ -84,7 +83,6 @@ function App() {
   type Tab = 'downloading' | 'completed' | 'search' | 'stats' | 'settings'
   const [activeTab, setActiveTab] = useState<Tab>('downloading')
   const [expandedHash, setExpandedHash] = useState<string | null>(null)
-  const [activeStreamUrl, setActiveStreamUrl] = useState<string | null>(null)
   const [clipboardMagnet, setClipboardMagnet] = useState<string | null>(null)
   const clipboardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const expandedHashRef = useRef<string | null>(null)
@@ -695,38 +693,22 @@ function App() {
                                     <Ban size={14} />
                                   </button>
                                 )}
-                                  {/* Stream in App button */}
-                                  <button
-                                    onClick={async () => {
-                                      if (window.torrentApi) {
-                                        try {
-                                          const url = await window.torrentApi.startStream(t.infoHash, i)
-                                          setActiveStreamUrl(url)
-                                        } catch (err: any) {
-                                          alert('Failed to start stream: ' + err.message)
-                                        }
+                                  {/* Stream in App button removed */}
+                                <button
+                                  onClick={async () => {
+                                    if (window.torrentApi) {
+                                      try {
+                                        await window.torrentApi.playExternal(t.infoHash, i)
+                                      } catch (err: any) {
+                                        alert('Failed to play in external app: ' + err.message)
                                       }
-                                    }}
-                                    title="Play In App"
-                                    className="p-1 hover:text-green-400 hover:bg-gray-800 rounded transition-colors"
-                                  >
-                                    <PlayCircle size={14} />
-                                  </button>
-                                  <button
-                                    onClick={async () => {
-                                      if (window.torrentApi) {
-                                        try {
-                                          await window.torrentApi.playExternal(t.infoHash, i)
-                                        } catch (err: any) {
-                                          alert('Failed to play in external app. You may need to configure your Media Player path in Settings.\n\nError: ' + err.message)
-                                        }
-                                      }
-                                    }}
-                                    title="Play in External App (VLC, IINA, etc.)"
-                                    className="p-1 hover:text-orange-400 hover:bg-gray-800 rounded transition-colors"
-                                  >
-                                    <MonitorPlay size={14} />
-                                  </button>
+                                    }
+                                  }}
+                                  title="Play in External App (VLC, IINA, etc.)"
+                                  className="p-1 hover:text-orange-400 hover:bg-gray-800 rounded transition-colors"
+                                >
+                                  <MonitorPlay size={14} />
+                                </button>
                                 <button
                                   onClick={async () => {
                                     if (window.torrentApi) {
@@ -866,12 +848,7 @@ function App() {
         </div>
       )}
 
-      {activeStreamUrl && (
-        <VideoPlayer 
-          streamUrl={activeStreamUrl} 
-          onClose={() => setActiveStreamUrl(null)} 
-        />
-      )}
+      {/* Video Streaming Modal removed as per user request */}
     </div>
   )
 }
