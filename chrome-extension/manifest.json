@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "TorrentPro Magnet Catcher",
+  "version": "1.0.0",
+  "description": "Detects magnet links on any webpage. Copy them or open them directly in TorrentPro.",
+  "permissions": ["activeTab"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
