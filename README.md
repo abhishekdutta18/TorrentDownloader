@@ -22,11 +22,15 @@ A modern, fast, and feature-rich desktop Torrent client built with Electron, Rea
 
 For most users, the easiest way to install Torrent Downloader is by downloading the pre-built application.
 
-### macOS (Apple Silicon)
+### macOS (Apple Silicon & Intel)
 1. Navigate to the `release/` folder or download the latest `.dmg` file from the [Releases](https://github.com/abhishekdutta18/TorrentDownloader/releases) page.
-2. Double-click the `Torrent Downloader-0.0.0-arm64.dmg` file to mount it.
+2. Double-click the downloaded `.dmg` file to mount it.
 3. Drag and drop the **Torrent Downloader** application into your `Applications` folder.
-4. Launch the app from your Applications folder!
+4. **Important**: Because this app is currently unsigned, macOS Gatekeeper may flag it as "damaged and can't be opened" when downloaded from the internet. To fix this, open your Terminal and run the following command to remove the quarantine flag:
+   ```bash
+   xattr -cr "/Applications/Torrent Downloader.app"
+   ```
+5. Launch the app from your Applications folder!
 
 ---
 
