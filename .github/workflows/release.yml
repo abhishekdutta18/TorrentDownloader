@@ -43,7 +43,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p build
-          base64 --decode scripts/icon-base64.txt > build/icon.png
+          base64 --decode < scripts/icon-base64.txt > build/icon.png
 
       - name: Build and Publish Release
         run: npm run build:publish
