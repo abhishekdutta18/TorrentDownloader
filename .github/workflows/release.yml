@@ -48,6 +48,9 @@ jobs:
         run: |
           node -e "import('png-to-ico').then(m => m.default('build/icon.png')).then(buf => require('fs').writeFileSync('build/icon.ico', buf));"
 
+      - name: Run Tests
+        run: npx vitest run
+
       - name: Build and Publish Release
         run: npm run build:publish
         env:
