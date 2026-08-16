@@ -269,8 +269,13 @@ app.whenReady().then(() => {
     }
   }
 
+  // Catch autoUpdater errors to prevent uncaught exceptions from crashing the app
+  autoUpdater.on('error', (err) => {
+    console.error('AutoUpdater error:', err)
+  })
+
   // Check for updates silently in the background
-  autoUpdater.checkForUpdatesAndNotify()
+  autoUpdater.checkForUpdatesAndNotify().catch(err => console.error('Check for updates failed:', err))
   
   // FIX: Ask user before installing update (prevents interrupting active downloads)
   autoUpdater.on('update-downloaded', () => {
