@@ -9,7 +9,7 @@ test.beforeAll(async () => {
   const isWin = process.platform === 'win32'
 
   let appPath = ''
-  let mainPath = path.join(import.meta.dirname, '..', 'dist-electron', 'main.js')
+  const mainPath = path.join(import.meta.dirname, '..', 'dist-electron', 'main.js')
 
   if (isMac) {
     appPath = path.join(import.meta.dirname, '..', 'release', 'mac-arm64', 'Torrent Downloader.app', 'Contents', 'MacOS', 'Torrent Downloader')
