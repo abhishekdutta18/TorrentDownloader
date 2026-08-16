@@ -39,11 +39,12 @@ interface Torrent {
 }
 
 function formatBytes(bytes: number, decimals = 2) {
-  if (bytes === 0 || bytes < 0) return '0 Bytes'
+  if (!bytes || bytes <= 0 || !isFinite(bytes)) return '0 Bytes'
   const k = 1024
   const dm = decimals < 0 ? 0 : decimals
   const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
+  if (i < 0 || i >= sizes.length) return '0 Bytes'
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
 }
 
@@ -79,7 +80,6 @@ function App() {
   const [torrents, setTorrents] = useState<Torrent[]>([])
   const [showAddModal, setShowAddModal] = useState(false)
   const [magnetLink, setMagnetLink] = useState('')
-  const [torrentFile, setTorrentFile] = useState<File | null>(null)
   const [error, setError] = useState('')
   type Tab = 'downloading' | 'completed' | 'search' | 'stats' | 'settings'
   const [activeTab, setActiveTab] = useState<Tab>('downloading')
@@ -94,6 +94,7 @@ function App() {
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
+  const [hasSearched, setHasSearched] = useState(false)
 
   // Speed history for chart (last 60 seconds)
   const [speedHistory, setSpeedHistory] = useState<{down: number, up: number, time: number}[]>([])
@@ -182,17 +183,14 @@ function App() {
   const handleAddTorrent = async (e?: React.FormEvent) => {
     e?.preventDefault()
     
-    // Electron's File object has a `path` property
-    const fileTarget = torrentFile ? (torrentFile as File & { path?: string }).path ?? null : null
-    const magnetTarget = magnetLink.trim()
-    const target = fileTarget || magnetTarget
+    const target = magnetLink.trim()
     
     if (!target) {
       return
     }
 
     // Basic validation for magnet links
-    if (!fileTarget && !target.startsWith('magnet:?')) {
+    if (!target.startsWith('magnet:?')) {
       setError('Please enter a valid magnet link (starts with magnet:?)')
       return
     }
@@ -203,7 +201,6 @@ function App() {
         await window.torrentApi.addTorrent(target)
       }
       setMagnetLink('')
-      setTorrentFile(null)
       setShowAddModal(false)
     } catch (err: unknown) {
       console.error('Error adding torrent in renderer:', err)
@@ -251,7 +248,6 @@ function App() {
   const handleOpenAddModal = () => {
     setError('')
     setMagnetLink('')
-    setTorrentFile(null)
     setShowAddModal(true)
   }
 
@@ -266,6 +262,7 @@ function App() {
         const results = await window.torrentApi.searchTorrents(searchQuery.trim())
         if (results.error) throw new Error(results.error)
         setSearchResults(results)
+        setHasSearched(true)
       }
     } catch (err: any) {
       setSearchError(err.message || 'Search failed')
@@ -417,7 +414,7 @@ function App() {
                     </div>
                   </div>
                 ))}
-                {!isSearching && searchResults.length === 0 && searchQuery && !searchError && (
+                {!isSearching && searchResults.length === 0 && hasSearched && !searchError && (
                   <div className="text-center text-gray-500 mt-10">No results found for "{searchQuery}"</div>
                 )}
               </div>
@@ -588,7 +585,7 @@ function App() {
                     </div>
                   </div>
                   
-                  <div className="h-2 w-full bg-gray-700 rounded-full overflow-hidden">
+                  <div className="h-2 w-full bg-gray-700 rounded-full overflow-hidden" role="progressbar" aria-valuenow={Math.round(t.progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label={`Download progress: ${Math.round(t.progress * 100)}%`}>
                     <div 
                       className={`h-full bg-blue-500 rounded-full transition-all duration-300 ease-out ${t.done ? 'bg-green-500' : ''}`}
                       style={{ width: `${t.progress * 100}%` }}
@@ -659,7 +656,7 @@ function App() {
                     {t.files && t.files.length > 0 && (
                       <div className="pt-2">
                         <h4 className="text-sm font-semibold text-gray-300 mb-2">Files</h4>
-                        <div className="space-y-2 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+                        <ul className="space-y-2 max-h-48 overflow-y-auto pr-2 custom-scrollbar list-none">
                           {t.files.map((f: any, i: number) => (
                             <li key={i} className={`flex justify-between items-center bg-gray-900/50 p-2 rounded border border-gray-700/50 ${f.skipped ? 'opacity-50 grayscale' : ''}`}>
                               <div className="flex flex-col overflow-hidden flex-1 pr-4">
@@ -760,7 +757,7 @@ function App() {
                               </div>
                               </li>
                             ))}
-                        </div>
+                        </ul>
                       </div>
                     )}
                   </div>
@@ -825,7 +822,7 @@ function App() {
                   </button>
                   <button 
                     type="submit"
-                    disabled={!magnetLink && !torrentFile}
+                    disabled={!magnetLink}
                     className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 disabled:cursor-not-allowed text-white rounded-xl transition-colors font-medium shadow-lg shadow-blue-500/20"
                   >
                     Download

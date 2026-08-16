@@ -1,22 +1,59 @@
 import { ipcRenderer, contextBridge } from 'electron'
 
-// --------- Expose some API to the Renderer process ---------
+// --------- Restricted IPC Channel Whitelist ---------
+// Only allow the renderer to communicate on channels the app actually uses.
+// This prevents a compromised renderer from invoking arbitrary IPC handlers.
+const ALLOWED_INVOKE_CHANNELS = new Set([
+  'add-torrent',
+  'get-torrents-status',
+  'remove-torrent',
+  'pause-torrent',
+  'resume-torrent',
+  'get-settings',
+  'save-settings',
+  'select-folder',
+  'open-folder',
+  'toggle-devtools',
+  'set-clipboard-watch',
+  'get-clipboard-watch',
+  'start-stream',
+  'play-external',
+  'clear-media-player',
+  'stop-stream',
+  'prioritize-file',
+  'skip-file',
+  'copy-to-clipboard',
+  'show-confirm-dialog',
+  'open-torrent-dialog',
+  'set-sequential',
+  'search-torrents',
+  'fetch-rss',
+])
+
+const ALLOWED_RECEIVE_CHANNELS = new Set([
+  'main-process-message',
+  'clipboard-magnet-detected',
+])
+
+// Expose a restricted ipcRenderer that only allows whitelisted channels
 contextBridge.exposeInMainWorld('ipcRenderer', {
-  on(...args: Parameters<typeof ipcRenderer.on>) {
-    const [channel, listener] = args
-    return ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
+  on(channel: string, listener: (...args: any[]) => void) {
+    if (!ALLOWED_RECEIVE_CHANNELS.has(channel)) {
+      console.warn(`[Preload] Blocked ipcRenderer.on for unauthorized channel: ${channel}`)
+      return
+    }
+    ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
   },
-  off(...args: Parameters<typeof ipcRenderer.off>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.off(channel, ...omit)
+  off(channel: string, listener: (...args: any[]) => void) {
+    if (!ALLOWED_RECEIVE_CHANNELS.has(channel)) return
+    ipcRenderer.off(channel, listener)
   },
-  send(...args: Parameters<typeof ipcRenderer.send>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.send(channel, ...omit)
-  },
-  invoke(...args: Parameters<typeof ipcRenderer.invoke>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.invoke(channel, ...omit)
+  invoke(channel: string, ...args: any[]) {
+    if (!ALLOWED_INVOKE_CHANNELS.has(channel)) {
+      console.warn(`[Preload] Blocked ipcRenderer.invoke for unauthorized channel: ${channel}`)
+      return Promise.reject(new Error(`Channel "${channel}" is not allowed`))
+    }
+    return ipcRenderer.invoke(channel, ...args)
   },
 })
 

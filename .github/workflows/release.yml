@@ -2,14 +2,16 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
-  workflow_dispatch: # Allow manual triggering
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-and-publish:
@@ -34,12 +36,16 @@ jobs:
           path: |
             ~/.cache/electron
             ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
           key: ${{ runner.os }}-electron-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-electron-
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Generate Icon
         run: |
@@ -48,7 +54,7 @@ jobs:
       - name: Generate Windows Icon
         if: matrix.os == 'windows-latest'
         run: |
-          node -e "import('png-to-ico').then(m => m.default('build/icon.png')).then(buf => require('fs').writeFileSync('build/icon.ico', buf));"
+          node -e "const fs = require('fs'); import('png-to-ico').then(m => m.default('build/icon.png')).then(buf => fs.writeFileSync('build/icon.ico', buf));"
 
       - name: Run Tests
         run: npx vitest run

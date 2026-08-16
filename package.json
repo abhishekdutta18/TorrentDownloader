@@ -13,26 +13,17 @@
     "release:minor": "npm version minor && git push --follow-tags",
     "release:major": "npm version major && git push --follow-tags",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview",
-    "cap:sync": "npx cap sync",
-    "cap:open:ios": "npx cap open ios",
-    "cap:open:android": "npx cap open android",
-    "deploy": "node ../BlogsPro/blogspro/deploy-worker.js --repo TorrentDownloader --git-changed"
+    "preview": "vite preview"
   },
   "repository": "https://github.com/abhishekdutta18/TorrentDownloader",
   "dependencies": {
-    "@capacitor/core": "^8.5.0",
     "electron-updater": "^6.8.9",
-    "isomorphic-git": "^1.41.0",
     "lucide-react": "^1.30.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "webtorrent": "^3.0.21"
   },
   "devDependencies": {
-    "@capacitor/android": "^8.5.0",
-    "@capacitor/cli": "^8.5.0",
-    "@capacitor/ios": "^8.5.0",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/react": "^16.3.2",
@@ -42,7 +33,6 @@
     "@typescript-eslint/eslint-plugin": "^7.1.1",
     "@typescript-eslint/parser": "^7.1.1",
     "@vitejs/plugin-react": "^6.0.5",
-    "autoprefixer": "^10.5.4",
     "electron": "^39.8.10",
     "electron-builder": "^26.15.3",
     "electron-playwright-helpers": "^3.1.1",
@@ -51,7 +41,6 @@
     "eslint-plugin-react-refresh": "^0.4.26",
     "jsdom": "^29.1.1",
     "png-to-ico": "^3.0.2",
-    "postcss": "^8.5.26",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.2.2",
     "vite": "^8.2.1",
@@ -70,6 +59,12 @@
       "dist",
       "dist-electron"
     ],
+    "protocols": {
+      "name": "Magnet Protocol",
+      "schemes": [
+        "magnet"
+      ]
+    },
     "mac": {
       "identity": null,
       "hardenedRuntime": false,
@@ -90,7 +85,8 @@
             "x64"
           ]
         }
-      ]
+      ],
+      "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
     },
     "win": {
       "target": [
@@ -100,14 +96,22 @@
             "x64"
           ]
         }
-      ]
+      ],
+      "artifactName": "${productName}-Windows-${version}-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
     },
     "linux": {
       "target": [
         "AppImage",
         "deb"
       ],
-      "category": "Network"
+      "category": "Network",
+      "artifactName": "${productName}-Linux-${version}.${ext}"
     },
     "publish": [
       {

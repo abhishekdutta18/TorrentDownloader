@@ -1,10 +1,37 @@
-# Logs
-logs
-*.log
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-electron/
+release/
+build/icon.ico
+
+# Test results
+test-results/
+
+# Environment files
+.env
+.env.*
+
+# OS files
 .DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
-release/
+
+# Logs
+logs/
+*.log
+
+# Torrent files
+*.torrent
+
+# SSH keys
+*.pub
+
+# Scratch/debug files
+scratch_*.tsx
+.Rhistory
