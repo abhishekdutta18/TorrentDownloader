@@ -784,7 +784,7 @@ app.whenReady().then(() => {
           if (currentSkipped[infoHash].length === 0) {
             delete currentSkipped[infoHash]
           }
-          store.saveState(store.state.activeTorrents, store.state.pausedTorrents, currentSkipped, store.state.torrentPaths || {}, store.state.processedRssLinks || [])
+          store.saveState(store.state.activeTorrents, store.state.pausedTorrents, currentSkipped, store.state.torrentPaths || {}, store.state.processedRssLinks || [], store.state.completedTorrents || [])
         }
         console.log(`Removed from skippedFiles`)
       } else {
@@ -809,7 +809,7 @@ app.whenReady().then(() => {
         if (!currentSkipped[infoHash].includes(fileIndex)) {
           currentSkipped[infoHash].push(fileIndex)
         }
-        store.saveState(store.state.activeTorrents, store.state.pausedTorrents, currentSkipped, store.state.torrentPaths || {}, store.state.processedRssLinks || [])
+        store.saveState(store.state.activeTorrents, store.state.pausedTorrents, currentSkipped, store.state.torrentPaths || {}, store.state.processedRssLinks || [], store.state.completedTorrents || [])
         console.log(`Added to skippedFiles`)
       } else {
         console.log(`Torrent or file not found!`)
@@ -960,7 +960,7 @@ async function checkRssFeeds() {
   }
   
   if (processedLinksChanged) {
-    store.saveState(store.state.activeTorrents, store.state.pausedTorrents, store.state.skippedFiles || {}, store.state.torrentPaths || {}, processedRssLinks)
+    store.saveState(store.state.activeTorrents, store.state.pausedTorrents, store.state.skippedFiles || {}, store.state.torrentPaths || {}, processedRssLinks, store.state.completedTorrents || [])
   }
 }
 

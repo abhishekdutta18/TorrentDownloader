@@ -102,8 +102,23 @@ class Store {
     })
   }
 
-  public saveState(activeTorrents: string[], pausedTorrents: string[], skippedFiles: Record<string, number[]> = {}, torrentPaths: Record<string, string> = {}, processedRssLinks: string[] = [], completedTorrents: string[] = []) {
-    this._state = { activeTorrents, pausedTorrents, skippedFiles, torrentPaths, processedRssLinks, completedTorrents }
+  public saveState(
+    activeTorrents?: string[],
+    pausedTorrents?: string[],
+    skippedFiles?: Record<string, number[]>,
+    torrentPaths?: Record<string, string>,
+    processedRssLinks?: string[],
+    completedTorrents?: string[]
+  ) {
+    const current = this.state
+    this._state = {
+      activeTorrents: activeTorrents !== undefined ? activeTorrents : current.activeTorrents,
+      pausedTorrents: pausedTorrents !== undefined ? pausedTorrents : current.pausedTorrents,
+      skippedFiles: skippedFiles !== undefined ? skippedFiles : current.skippedFiles,
+      torrentPaths: torrentPaths !== undefined ? torrentPaths : current.torrentPaths,
+      processedRssLinks: processedRssLinks !== undefined ? processedRssLinks : current.processedRssLinks,
+      completedTorrents: completedTorrents !== undefined ? completedTorrents : current.completedTorrents,
+    }
     const data = JSON.stringify(this._state, null, 2)
     const tempPath = this.statePath + '.tmp'
     

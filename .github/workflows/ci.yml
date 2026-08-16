@@ -25,5 +25,11 @@ jobs:
       - name: Run Linter
         run: npm run lint
 
+      - name: Type Check
+        run: npx tsc --noEmit
+
+      - name: Run Tests
+        run: npx vitest run
+
       - name: Build Application (Dry Run)
-        run: npm run build
+        run: npx vite build
