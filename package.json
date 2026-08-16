@@ -66,6 +66,10 @@
       ]
     },
     "mac": {
+      "extendInfo": {
+        "NSDownloadsFolderUsageDescription": "Torrent Downloader needs access to your Downloads folder to save downloaded files.",
+        "NSDocumentsFolderUsageDescription": "Torrent Downloader needs access to your Documents folder to save downloaded files."
+      },
       "identity": null,
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
