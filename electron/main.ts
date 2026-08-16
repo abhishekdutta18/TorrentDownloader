@@ -152,28 +152,27 @@ function createWindow() {
 }
 
 // FIX: Graceful cleanup on macOS quit (before-quit fires before window-all-closed on Cmd+Q)
-app.on('before-quit', () => {
+let isQuitting = false
+app.on('before-quit', (e) => {
+  if (isQuitting) return
+  isQuitting = true
+  e.preventDefault()
+  
   stopClipboardWatch()
   if (webtorrentServer) {
     try { webtorrentServer.close() } catch { /* ignore */ }
     webtorrentServer = null
   }
-  client.destroy(() => {
-    // Client destroyed, app can quit
+  client.destroy(async () => {
+    // Client destroyed, now wait for pending writes
+    await store.waitForWrites()
+    app.quit()
   })
 })
 
 app.on('window-all-closed', () => {
-  stopClipboardWatch()
   if (process.platform !== 'darwin') {
-    // Graceful shutdown: destroy WebTorrent client and close HTTP server (#10, #16)
-    if (webtorrentServer) {
-      try { webtorrentServer.close() } catch { /* ignore */ }
-    }
-    client.destroy(() => {
-      app.quit()
-    })
-    win = null
+    app.quit()
   }
 })
 
@@ -314,6 +313,7 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+  startRssPolling()
 
   // Setup application menu to enable Copy/Paste on macOS
   const template: MenuItemConstructorOptions[] = [
@@ -1084,7 +1084,8 @@ async function checkRssFeeds() {
   }
 }
 
-// Start polling every 15 minutes
-setInterval(checkRssFeeds, 15 * 60 * 1000)
-// Check on startup
-setTimeout(checkRssFeeds, 5000)
+// Exported for testing or called from whenReady
+export function startRssPolling() {
+  setInterval(checkRssFeeds, 15 * 60 * 1000)
+  setTimeout(checkRssFeeds, 5000)
+}

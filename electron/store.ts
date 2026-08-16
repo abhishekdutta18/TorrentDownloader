@@ -128,6 +128,10 @@ class Store {
         .catch(err => console.error('Failed to save state:', err))
     })
   }
+
+  public waitForWrites(): Promise<void> {
+    return this.writeQueue
+  }
 }
 
 export const store = new Store()

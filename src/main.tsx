@@ -88,22 +88,33 @@ if (window.ipcRenderer) {
 // Fallback for Capacitor / Mobile Browsers
 if (!window.torrentApi) {
   window.torrentApi = {
-    addTorrent: async () => { alert("The Torrent Engine is not yet supported on Mobile."); },
+    addTorrent: async () => { alert("The Torrent Engine is not supported on Mobile."); return { infoHash: "" }; },
     getTorrentsStatus: async () => [],
     pauseTorrent: async () => {},
     resumeTorrent: async () => {},
     removeTorrent: async () => {},
     openFolder: async () => {},
     openTorrentDialog: async () => null,
-    searchTorrents: async () => ({ error: "Not supported" } as any),
+    searchTorrents: async () => [],
     setSequential: async () => {},
     startStream: async () => "",
     playExternal: async () => false,
     copyToClipboard: async () => {},
-    getSettings: async () => ({} as any),
-    saveSettings: async () => ({} as any),
-    toggleDevTools: () => {},
+    getSettings: async () => ({
+      downloadPath: '', downloadLimit: 0, uploadLimit: 0, startOnBoot: false, mediaPlayerPath: '', rssFeeds: [], rssRules: []
+    }),
+    saveSettings: async () => ({
+      downloadPath: '', downloadLimit: 0, uploadLimit: 0, startOnBoot: false, mediaPlayerPath: '', rssFeeds: [], rssRules: []
+    }),
+    toggleDevTools: async () => {},
     showConfirmDialog: async () => false,
-    onClipboardMagnet: () => { return () => {}; }
+    onClipboardMagnet: () => { return () => {}; },
+    setClipboardWatch: async () => false,
+    getClipboardWatch: async () => false,
+    clearMediaPlayer: async () => {},
+    stopStream: async () => {},
+    prioritizeFile: async () => {},
+    skipFile: async () => {},
+    fetchRss: async () => []
   } as any;
 }

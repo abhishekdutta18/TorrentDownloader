@@ -277,7 +277,7 @@ function App() {
       <div className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
         <div className="pt-10 pb-4 px-4 border-b border-gray-700 flex items-center space-x-2 [-webkit-app-region:drag]">
           <Activity className="text-blue-500" size={24} />
-          <h1 className="text-xl font-bold tracking-tight">TorrentPro</h1>
+          <h1 className="text-xl font-bold tracking-tight">Torrent Downloader</h1>
         </div>
         
         <nav className="flex-1 p-4 space-y-2">
@@ -477,10 +477,11 @@ function App() {
                       const downPoints = getPoints('down');
                       const upPoints = getPoints('up');
 
+                      const lastX = speedHistory.length > 0 ? ((speedHistory.length - 1) / (Math.max(60, speedHistory.length) - 1)) * width : 0;
                       return (
                         <>
-                          <polygon points={`0%,100% ${downPoints} 100%,100%`} fill="url(#downGrad)" />
-                          <polygon points={`0%,100% ${upPoints} 100%,100%`} fill="url(#upGrad)" />
+                          <polygon points={`0%,100% ${downPoints} ${lastX}%,100%`} fill="url(#downGrad)" />
+                          <polygon points={`0%,100% ${upPoints} ${lastX}%,100%`} fill="url(#upGrad)" />
                           
                           <polyline points={downPoints} fill="none" stroke="#4ade80" strokeWidth="2" vectorEffect="non-scaling-stroke" />
                           <polyline points={upPoints} fill="none" stroke="#f87171" strokeWidth="2" vectorEffect="non-scaling-stroke" />
