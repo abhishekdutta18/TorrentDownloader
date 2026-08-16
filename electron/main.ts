@@ -17,7 +17,21 @@ export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
-process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
+export const DEFAULT_ANNOUNCE = [
+  'udp://tracker.opentrackr.org:1337/announce',
+  'udp://open.tracker.cl:1337/announce',
+  'udp://tracker.openbittorrent.com:6969/announce',
+  'udp://exodus.desync.com:6969/announce',
+  'udp://tracker.torrent.eu.org:451/announce',
+  'udp://open.stealth.si:80/announce',
+  'udp://tracker.dler.org:6969/announce',
+  'udp://tracker.moeking.me:6969/announce',
+  'udp://explodie.org:6969/announce',
+  'udp://tracker.altrosky.nl:6969/announce',
+  'wss://tracker.openwebtorrent.com',
+  'wss://tracker.btorrent.xyz',
+  'wss://tracker.fastcast.nz'
+]
 
 let win: BrowserWindow | null
 let clipboardWatchInterval: ReturnType<typeof setInterval> | null = null
@@ -29,21 +43,7 @@ const client = new WebTorrent({
   lsd: true,
   webSeeds: true,
   tracker: {
-    announce: [
-      'udp://tracker.opentrackr.org:1337/announce',
-      'udp://open.tracker.cl:1337/announce',
-      'udp://tracker.openbittorrent.com:6969/announce',
-      'udp://exodus.desync.com:6969/announce',
-      'udp://tracker.torrent.eu.org:451/announce',
-      'udp://open.stealth.si:80/announce',
-      'udp://tracker.dler.org:6969/announce',
-      'udp://tracker.moeking.me:6969/announce',
-      'udp://explodie.org:6969/announce',
-      'udp://tracker.altrosky.nl:6969/announce',
-      'wss://tracker.openwebtorrent.com',
-      'wss://tracker.btorrent.xyz',
-      'wss://tracker.fastcast.nz'
-    ]
+    announce: DEFAULT_ANNOUNCE
   }
 })
 
@@ -188,7 +188,7 @@ function handleMagnetUrl(url: string) {
     const infoHash = infoHashMatch ? infoHashMatch[1].toLowerCase() : null
     const existing = infoHash ? client.get(infoHash) : null
     if (!existing) {
-      const torrent = client.add(url, { path: store.settings.downloadPath })
+      const torrent = client.add(url, { path: store.settings.downloadPath, announce: DEFAULT_ANNOUNCE })
       torrent.on('infoHash', () => {
         originalIds.set(torrent.infoHash, url)
         saveActiveTorrents()
@@ -412,7 +412,7 @@ app.whenReady().then(() => {
         // Use the saved per-torrent path if available, otherwise fall back to current setting (#11)
         const infoHashFromMagnet = magnet.match(/btih:([a-fA-F0-9]{40})/i)?.[1]?.toLowerCase()
         const torrentPath = (infoHashFromMagnet && savedPaths[infoHashFromMagnet]) || store.settings.downloadPath
-        const t = client.add(magnet, { path: torrentPath })
+        const t = client.add(magnet, { path: torrentPath, announce: DEFAULT_ANNOUNCE })
 
         t.on('ready', () => {
           // Apply saved skip state
@@ -477,7 +477,7 @@ app.whenReady().then(() => {
         let torrent: any
         try {
           console.log(`Adding torrent: ${torrentId}`)
-          torrent = client.add(torrentId, { path: store.settings.downloadPath })
+          torrent = client.add(torrentId, { path: store.settings.downloadPath, announce: DEFAULT_ANNOUNCE })
         } catch (err: any) {
           console.error('Failed to add torrent:', err)
           return reject(err.message || String(err))
@@ -1043,7 +1043,7 @@ async function checkRssFeeds() {
                   const existing = client.get(searchId)
                   if (!existing) {
                     console.log(`[RSS] Auto-adding ${title} (matched rule: ${rule})`)
-                    const torrent = client.add(link, { path: store.settings.downloadPath })
+                    const torrent = client.add(link, { path: store.settings.downloadPath, announce: DEFAULT_ANNOUNCE })
                     torrent.on('infoHash', () => {
                       originalIds.set(torrent.infoHash, link)
                       saveActiveTorrents()

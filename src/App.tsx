@@ -189,16 +189,26 @@ function App() {
       return
     }
 
-    // Basic validation for magnet links
-    if (!target.startsWith('magnet:?')) {
-      setError('Please enter a valid magnet link (starts with magnet:?)')
+    // Basic validation for magnet links or HTTP(S) torrent URLs
+    if (!target.startsWith('magnet:?') && !target.startsWith('http://') && !target.startsWith('https://')) {
+      setError('Please enter a valid magnet link (starts with magnet:?) or .torrent URL')
       return
     }
 
     try {
       setError('')
       if (window.torrentApi) {
-        await window.torrentApi.addTorrent(target)
+        const res = await window.torrentApi.addTorrent(target)
+        if (res && res.infoHash) {
+          const existing = torrents.find(t => t.infoHash === res.infoHash)
+          if (existing && existing.done) {
+            setActiveTab('completed')
+            setExpandedHash(res.infoHash)
+          } else {
+            setActiveTab('downloading')
+            setExpandedHash(res.infoHash)
+          }
+        }
       }
       setMagnetLink('')
       setShowAddModal(false)
@@ -207,6 +217,9 @@ function App() {
       setError(err instanceof Error ? err.message : String(err))
     }
   }
+
+  const downloadingCount = torrents.filter(t => !t.done).length
+  const completedCount = torrents.filter(t => t.done).length
 
   const displayedTorrents = torrents.filter(t => {
     if (activeTab === 'downloading') return !t.done
@@ -283,17 +296,27 @@ function App() {
         <nav className="flex-1 p-4 space-y-2">
           <button 
             onClick={() => { setActiveTab('downloading'); setExpandedHash(null); }}
-            className={`flex items-center space-x-3 w-full p-2 rounded-lg transition-colors ${activeTab === 'downloading' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-gray-700/50 text-gray-400'}`}
+            className={`flex items-center justify-between w-full p-2 rounded-lg transition-colors ${activeTab === 'downloading' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-gray-700/50 text-gray-400'}`}
           >
-            <Download size={20} />
-            <span className="font-medium">Downloading</span>
+            <div className="flex items-center space-x-3">
+              <Download size={20} />
+              <span className="font-medium">Downloading</span>
+            </div>
+            {downloadingCount > 0 && (
+              <span className="text-xs bg-blue-500/20 text-blue-300 font-semibold px-2 py-0.5 rounded-full">{downloadingCount}</span>
+            )}
           </button>
           <button 
             onClick={() => { setActiveTab('completed'); setExpandedHash(null); }}
-            className={`flex items-center space-x-3 w-full p-2 rounded-lg transition-colors ${activeTab === 'completed' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-gray-700/50 text-gray-400'}`}
+            className={`flex items-center justify-between w-full p-2 rounded-lg transition-colors ${activeTab === 'completed' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-gray-700/50 text-gray-400'}`}
           >
-            <HardDrive size={20} />
-            <span className="font-medium">Completed</span>
+            <div className="flex items-center space-x-3">
+              <HardDrive size={20} />
+              <span className="font-medium">Completed</span>
+            </div>
+            {completedCount > 0 && (
+              <span className="text-xs bg-green-500/20 text-green-300 font-semibold px-2 py-0.5 rounded-full">{completedCount}</span>
+            )}
           </button>
           <button 
             onClick={() => { setActiveTab('search'); setExpandedHash(null); }}
@@ -777,13 +800,13 @@ function App() {
             <form onSubmit={handleAddTorrent}>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-1">Magnet Link</label>
+                  <label className="block text-sm font-medium text-gray-400 mb-1">Magnet Link or .torrent URL</label>
                   <input 
                     type="text" 
                     value={magnetLink}
                     onChange={(e) => setMagnetLink(e.target.value)}
                     className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow placeholder-gray-600 mb-3"
-                    placeholder="magnet:?xt=urn:btih:..."
+                    placeholder="magnet:?xt=urn:btih:... or https://..."
                     autoFocus
                   />
                   <label className="block text-sm font-medium text-gray-400 mb-1">Or select a .torrent file</label>
