@@ -18,11 +18,11 @@ export default defineConfig({
           build: {
             target: 'esnext',
             rollupOptions: {
-              external: ['webtorrent', 'node-datachannel', 'sqlite3'],
+              external: ['webtorrent', 'node-datachannel'],
             },
           },
           ssr: {
-            external: ['webtorrent', 'node-datachannel', 'sqlite3'],
+            external: ['webtorrent', 'node-datachannel'],
           }
         },
       },
@@ -46,7 +46,7 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      external: ['webtorrent', 'node-datachannel', 'sqlite3']
+      external: ['webtorrent', 'node-datachannel']
     }
   }
 })

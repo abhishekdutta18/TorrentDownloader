@@ -1,14 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
 
-interface AppSettings {
-  downloadPath: string
-  downloadLimit: number
-  uploadLimit: number
-  startOnBoot: boolean
-  mediaPlayerPath: string
-  rssFeeds: string[]
-  rssRules: string[]
-}
 
 export function Settings() {
   const [settings, setSettings] = useState<AppSettings | null>(null)

@@ -58,7 +58,11 @@ class Store {
     try {
       if (fs.existsSync(this.settingsPath)) {
         const loaded = JSON.parse(fs.readFileSync(this.settingsPath, 'utf-8'))
-        return { ...defaults, ...loaded }
+        const settings = { ...defaults, ...loaded }
+        if (!fs.existsSync(settings.downloadPath)) {
+          settings.downloadPath = defaults.downloadPath
+        }
+        return settings
       }
     } catch (err) {
       console.error('Failed to load settings:', err)

@@ -8476,11 +8476,11 @@ Please double check that your authentication token is correct. Due to security r
 		};
 		try {
 			if (u.existsSync(this.settingsPath)) {
-				let t = JSON.parse(u.readFileSync(this.settingsPath, "utf-8"));
-				return {
+				let t = JSON.parse(u.readFileSync(this.settingsPath, "utf-8")), n = {
 					...e,
 					...t
 				};
+				return u.existsSync(n.downloadPath) || (n.downloadPath = e.downloadPath), n;
 			}
 		} catch (e) {
 			console.error("Failed to load settings:", e);
@@ -8529,6 +8529,9 @@ Please double check that your authentication token is correct. Due to security r
 		};
 		let s = JSON.stringify(this._state, null, 2), c = this.statePath + ".tmp";
 		this.writeQueue = this.writeQueue.then(() => u.promises.writeFile(c, s, "utf-8").then(() => u.promises.rename(c, this.statePath)).catch((e) => console.error("Failed to save state:", e)));
+	}
+	waitForWrites() {
+		return this.writeQueue;
 	}
 }(), _n = (await import(
 	/* @vite-ignore */
@@ -8602,57 +8605,46 @@ function An() {
 		Q = null;
 	}), yn ? Q.loadURL(yn) : Q.loadFile(l.join(xn, "index.html"));
 }
-r.on("before-quit", () => {
-	if (kn(), Tn) {
-		try {
-			Tn.close();
-		} catch {}
-		Tn = null;
+var jn = !1;
+r.on("before-quit", (e) => {
+	if (!jn) {
+		if (jn = !0, e.preventDefault(), kn(), Tn) {
+			try {
+				Tn.close();
+			} catch {}
+			Tn = null;
+		}
+		$.destroy(async () => {
+			await Z.waitForWrites(), r.quit();
+		});
 	}
-	$.destroy(() => {});
 }), r.on("window-all-closed", () => {
-	if (kn(), process.platform !== "darwin") {
-		if (Tn) try {
-			Tn.close();
-		} catch {}
-		$.destroy(() => {
-			r.quit();
-		}), Q = null;
-	}
-}), r.on("open-url", async (e, t) => {
-	if (e.preventDefault(), t.startsWith("magnet:")) try {
-		let e = t.match(/btih:([a-fA-F0-9]{40})/i) || t.match(/btih:([A-Z2-7]{32})/i), n = e ? e[1].toLowerCase() : null;
+	process.platform !== "darwin" && r.quit();
+});
+function Mn(e) {
+	if (e.startsWith("magnet:")) try {
+		let t = e.match(/btih:([a-fA-F0-9]{40})/i) || e.match(/btih:([A-Z2-7]{32})/i), n = t ? t[1].toLowerCase() : null;
 		if (!(n && $.get(n))) {
-			let e = $.add(t, { path: Z.settings.downloadPath });
-			e.on("infoHash", () => {
-				wn.set(e.infoHash, t), Dn();
-			}), e.on("error", (e) => {
-				console.error("Protocol handler torrent error:", e);
+			let t = $.add(e, { path: Z.settings.downloadPath });
+			t.on("infoHash", () => {
+				wn.set(t.infoHash, e), Dn();
+			}), t.on("error", (e) => {
+				console.error("Magnet handler torrent error:", e);
 			});
 		}
 	} catch (e) {
-		console.error("Failed to add magnet from protocol handler:", e);
+		console.error("Failed to handle magnet URI:", e);
 	}
+}
+r.on("open-url", async (e, t) => {
+	e.preventDefault(), Mn(t);
 }), r.on("second-instance", (e, t) => {
 	let n = t.find((e) => e.startsWith("magnet:"));
-	if (n) try {
-		let e = n.match(/btih:([a-fA-F0-9]{40})/i) || n.match(/btih:([A-Z2-7]{32})/i), t = e ? e[1].toLowerCase() : null;
-		if (!(t && $.get(t))) {
-			let e = $.add(n, { path: Z.settings.downloadPath });
-			e.on("infoHash", () => {
-				wn.set(e.infoHash, n), Dn();
-			}), e.on("error", (e) => {
-				console.error("Second instance torrent error:", e);
-			});
-		}
-	} catch (e) {
-		console.error("Failed to add magnet from protocol handler:", e);
-	}
-	Q && (Q.isMinimized() && Q.restore(), Q.focus());
+	n && Mn(n), Q && (Q.isMinimized() && Q.restore(), Q.focus());
 }), r.on("activate", () => {
 	t.getAllWindows().length === 0 && An();
 });
-async function jn() {
+async function Nn() {
 	if (!Tn) {
 		if (En) {
 			await En;
@@ -8665,7 +8657,7 @@ async function jn() {
 		}), await En, En = null;
 	}
 }
-function Mn(e) {
+function Pn(e) {
 	try {
 		let t = new URL(e);
 		if (t.protocol !== "http:" && t.protocol !== "https:") return !1;
@@ -8699,7 +8691,7 @@ r.whenReady().then(() => {
 		}).then(({ response: e }) => {
 			e === 1 && gn.autoUpdater.quitAndInstall(!1, !0);
 		}) : gn.autoUpdater.autoInstallOnAppQuit = !0;
-	}), An();
+	}), An(), Ln();
 	let e = [
 		{
 			label: "Edit",
@@ -8896,7 +8888,7 @@ r.whenReady().then(() => {
 		let n = {};
 		typeof t.downloadPath == "string" && (n.downloadPath = t.downloadPath), typeof t.downloadLimit == "number" && isFinite(t.downloadLimit) && t.downloadLimit >= 0 && (n.downloadLimit = t.downloadLimit), typeof t.uploadLimit == "number" && isFinite(t.uploadLimit) && t.uploadLimit >= 0 && (n.uploadLimit = t.uploadLimit), typeof t.startOnBoot == "boolean" && (n.startOnBoot = t.startOnBoot), typeof t.mediaPlayerPath == "string" && (n.mediaPlayerPath = t.mediaPlayerPath), Array.isArray(t.rssFeeds) && (n.rssFeeds = t.rssFeeds.filter((e) => typeof e == "string")), Array.isArray(t.rssRules) && (n.rssRules = t.rssRules.filter((e) => typeof e == "string")), Z.saveSettings(n);
 		let r = n.downloadLimit > 0 ? n.downloadLimit : -1, i = n.uploadLimit > 0 ? n.uploadLimit : -1;
-		return typeof $.throttleDownload == "function" && $.throttleDownload(r), typeof $.throttleUpload == "function" && $.throttleUpload(i), Pn(), Z.settings;
+		return typeof $.throttleDownload == "function" && $.throttleDownload(r), typeof $.throttleUpload == "function" && $.throttleUpload(i), In(), Z.settings;
 	}), o.handle("show-confirm-dialog", async (e, t, n) => {
 		if (!Q) return !1;
 		let { response: r } = await a.showMessageBox(Q, {
@@ -8917,7 +8909,7 @@ r.whenReady().then(() => {
 	}), o.handle("set-clipboard-watch", (e, t) => (t ? On() : kn(), t)), o.handle("get-clipboard-watch", () => !!Sn), o.handle("start-stream", async (e, t, n) => {
 		let r = $.get(t);
 		if (!r) throw Error("Torrent not found");
-		await jn();
+		await Nn();
 		let i = r.files[n];
 		if (!i) throw Error("File not found");
 		let a = Tn?.address();
@@ -8927,7 +8919,7 @@ r.whenReady().then(() => {
 		try {
 			let e = $.get(t);
 			if (!e || !e.files[n]) throw Error("Torrent or file not found");
-			await jn();
+			await Nn();
 			let r = Tn?.address();
 			if (!r) throw Error("Streaming server not ready");
 			let i = `http://localhost:${r.port}${e.files[n].streamURL}`, o = Z.settings.mediaPlayerPath;
@@ -9043,7 +9035,7 @@ r.whenReady().then(() => {
 			return console.error("Search failed:", e), { error: e.message };
 		}
 	}), o.handle("fetch-rss", async (e, t) => {
-		if (!Mn(t)) return { error: "Invalid or blocked URL. Only http/https URLs to public hosts are allowed." };
+		if (!Pn(t)) return { error: "Invalid or blocked URL. Only http/https URLs to public hosts are allowed." };
 		try {
 			let e = await fetch(t);
 			if (!e.ok) throw Error(`HTTP ${e.status}`);
@@ -9053,14 +9045,14 @@ r.whenReady().then(() => {
 		}
 	});
 });
-var Nn = 1e4;
-async function Pn() {
+var Fn = 1e4;
+async function In() {
 	let { rssFeeds: e, rssRules: t } = Z.settings;
 	if (!e || !e.length || !t || !t.length) return;
 	console.log("[RSS] Checking feeds for auto-download...");
 	let n = Z.state.processedRssLinks || [], r = !1;
 	for (let i of e) {
-		if (!Mn(i)) {
+		if (!Pn(i)) {
 			console.warn(`[RSS] Skipping unsafe feed URL: ${i}`);
 			continue;
 		}
@@ -9107,10 +9099,12 @@ async function Pn() {
 		}
 	}
 	if (r) {
-		for (; n.length > Nn;) n.shift();
+		for (; n.length > Fn;) n.shift();
 		Z.saveState(Z.state.activeTorrents, Z.state.pausedTorrents, Z.state.skippedFiles || {}, Z.state.torrentPaths || {}, n, Z.state.completedTorrents || []);
 	}
 }
-setInterval(Pn, 9e5), setTimeout(Pn, 5e3);
+function Ln() {
+	setInterval(In, 9e5), setTimeout(In, 5e3);
+}
 //#endregion
-export { bn as MAIN_DIST, xn as RENDERER_DIST, yn as VITE_DEV_SERVER_URL };
+export { bn as MAIN_DIST, xn as RENDERER_DIST, yn as VITE_DEV_SERVER_URL, Ln as startRssPolling };

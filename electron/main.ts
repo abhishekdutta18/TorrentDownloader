@@ -176,50 +176,36 @@ app.on('window-all-closed', () => {
   }
 })
 
+function handleMagnetUrl(url: string) {
+  if (!url.startsWith('magnet:')) return
+  try {
+    const infoHashMatch = url.match(/btih:([a-fA-F0-9]{40})/i) || url.match(/btih:([A-Z2-7]{32})/i)
+    const infoHash = infoHashMatch ? infoHashMatch[1].toLowerCase() : null
+    const existing = infoHash ? client.get(infoHash) : null
+    if (!existing) {
+      const torrent = client.add(url, { path: store.settings.downloadPath })
+      torrent.on('infoHash', () => {
+        originalIds.set(torrent.infoHash, url)
+        saveActiveTorrents()
+      })
+      torrent.on('error', (err: Error) => {
+        console.error('Magnet handler torrent error:', err)
+      })
+    }
+  } catch (err) {
+    console.error('Failed to handle magnet URI:', err)
+  }
+}
+
 app.on('open-url', async (event, url) => {
   event.preventDefault()
-  if (url.startsWith('magnet:')) {
-    try {
-      const infoHashMatch = url.match(/btih:([a-fA-F0-9]{40})/i) || url.match(/btih:([A-Z2-7]{32})/i)
-      const infoHash = infoHashMatch ? infoHashMatch[1].toLowerCase() : null
-      const existing = infoHash ? client.get(infoHash) : null
-      if (!existing) {
-        const torrent = client.add(url, { path: store.settings.downloadPath })
-        torrent.on('infoHash', () => {
-          originalIds.set(torrent.infoHash, url)
-          saveActiveTorrents()
-        })
-        torrent.on('error', (err: Error) => {
-          console.error('Protocol handler torrent error:', err)
-        })
-      }
-    } catch (err) {
-      console.error('Failed to add magnet from protocol handler:', err)
-    }
-  }
+  handleMagnetUrl(url)
 })
 
 app.on('second-instance', (_event, commandLine) => {
   const url = commandLine.find((arg) => arg.startsWith('magnet:'))
-  if (url) {
-    try {
-      const infoHashMatch = url.match(/btih:([a-fA-F0-9]{40})/i) || url.match(/btih:([A-Z2-7]{32})/i)
-      const infoHash = infoHashMatch ? infoHashMatch[1].toLowerCase() : null
-      const existing = infoHash ? client.get(infoHash) : null
-      if (!existing) {
-        const torrent = client.add(url, { path: store.settings.downloadPath })
-        torrent.on('infoHash', () => {
-          originalIds.set(torrent.infoHash, url)
-          saveActiveTorrents()
-        })
-        torrent.on('error', (err: Error) => {
-          console.error('Second instance torrent error:', err)
-        })
-      }
-    } catch (err) {
-      console.error('Failed to add magnet from protocol handler:', err)
-    }
-  }
+  if (url) handleMagnetUrl(url)
+  
   if (win) {
     if (win.isMinimized()) win.restore()
     win.focus()
