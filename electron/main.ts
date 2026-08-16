@@ -46,6 +46,11 @@ const client = new WebTorrent({
     ]
   }
 })
+
+client.on('error', (err: any) => {
+  console.error('WebTorrent client error:', err)
+})
+
 if (store.settings.downloadLimit > 0 && typeof client.throttleDownload === 'function') {
   client.throttleDownload(store.settings.downloadLimit)
 }
