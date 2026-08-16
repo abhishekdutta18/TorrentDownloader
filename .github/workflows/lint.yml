@@ -1,1 +1,9 @@
-# deleted
+name: Deprecated Workflow
+on:
+  workflow_dispatch:
+
+jobs:
+  deprecated:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'This workflow is deprecated.'
