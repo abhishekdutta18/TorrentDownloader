@@ -8679,7 +8679,9 @@ r.whenReady().then(() => {
 			], () => {});
 		}
 	} catch {}
-	gn.autoUpdater.checkForUpdatesAndNotify(), gn.autoUpdater.on("update-downloaded", () => {
+	gn.autoUpdater.on("error", (e) => {
+		console.error("AutoUpdater error:", e);
+	}), gn.autoUpdater.checkForUpdatesAndNotify().catch((e) => console.error("Check for updates failed:", e)), gn.autoUpdater.on("update-downloaded", () => {
 		let e = $.torrents.filter((e) => !e.done && !e.paused).length, t = e > 0 ? `An update has been downloaded. You have ${e} active download(s). Restart now to install the update?` : "An update has been downloaded. Restart now to install?";
 		Q ? a.showMessageBox(Q, {
 			type: "question",
