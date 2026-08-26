@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FluxTorrent</title>
+    <style>
+        body {
+            margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #121212; color: #e0e0e0; display: flex; height: 100vh; overflow: hidden;
+        }
+        .sidebar {
+            width: 250px; background-color: #1e1e1e; padding: 20px; border-right: 1px solid #333;
+            box-sizing: border-box; display: flex; flex-direction: column;
+        }
+        .sidebar h2 { margin-top: 0; color: #4ade80; display: flex; align-items: center; gap: 10px; }
+        .menu-item {
+            padding: 12px 15px; margin: 5px 0; border-radius: 8px; cursor: pointer; transition: background 0.2s;
+            font-size: 15px;
+        }
+        .menu-item:hover, .menu-item.active { background-color: #2c2c2c; color: #4ade80; }
+        .main-content {
+            flex-grow: 1; padding: 30px; overflow-y: auto; position: relative; box-sizing: border-box;
+        }
+        .header { display: flex; justify-content: space-between; margin-bottom: 30px; align-items: center; }
+        .header-actions { display: flex; gap: 10px; }
+        .btn-add {
+            background-color: #4ade80; color: #121212; border: none; padding: 10px 20px; 
+            border-radius: 6px; font-weight: bold; cursor: pointer; transition: opacity 0.2s, background-color 0.2s;
+        }
+        .btn-add:hover { opacity: 0.9; }
+        .btn-secondary {
+            background-color: #3b82f6; color: #ffffff; border: none; padding: 10px 20px;
+            border-radius: 6px; font-weight: bold; cursor: pointer; transition: opacity 0.2s;
+        }
+        .btn-secondary:hover { opacity: 0.9; }
+        
+        .torrent-card {
+            background-color: #1e1e1e; border-radius: 10px; padding: 20px; margin-bottom: 15px;
+            border: 1px solid #333;
+        }
+        .torrent-header { display: flex; justify-content: space-between; margin-bottom: 15px; align-items: center; }
+        .torrent-name { font-weight: bold; font-size: 1.1em; color: #fff; word-break: break-word; }
+        .torrent-status { color: #888; font-size: 0.9em; text-transform: capitalize; }
+        
+        .progress-bg { background-color: #333; height: 8px; border-radius: 4px; overflow: hidden; margin-bottom: 10px; }
+        .progress-fill { background-color: #4ade80; height: 100%; transition: width 0.3s ease; }
+        
+        .torrent-stats { display: flex; gap: 20px; font-size: 0.85em; color: #aaa; flex-wrap: wrap; }
+        .torrent-actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+        .filter-btn { background: #333; border: 1px solid #444; color: #fff; padding: 4px 12px; border-radius: 12px; cursor: pointer; font-size: 13px; }
+        .filter-btn.active { background: #3b82f6; border-color: #3b82f6; }
+
+        
+        #drop-overlay {
+            display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(18, 18, 18, 0.9); border: 2px dashed #4ade80; border-radius: 12px;
+            z-index: 100; box-sizing: border-box; align-items: center; justify-content: center;
+            flex-direction: column; pointer-events: none;
+        }
+
+        #add-modal {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.7); align-items: center; justify-content: center; z-index: 200;
+        }
+        .modal-content {
+            background: #1e1e1e; padding: 30px; border-radius: 12px; width: 400px; border: 1px solid #333;
+        }
+        .modal-content input {
+            width: 100%; padding: 10px; margin: 15px 0; border-radius: 6px; border: 1px solid #444; 
+            background: #121212; color: #fff; box-sizing: border-box;
+        }
+        .btn-close { background: transparent; border: 1px solid #555; color: #fff; padding: 10px 20px; border-radius: 6px; cursor: pointer; }
+    
+        .tab-header { display: flex; border-bottom: 1px solid #333; margin-bottom: 15px; }
+        .tab-btn { padding: 10px 20px; background: none; border: none; color: #888; cursor: pointer; font-size: 16px; border-bottom: 2px solid transparent; }
+        .tab-btn.active { color: #4ade80; border-bottom-color: #4ade80; }
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
+        .details-modal { width: 600px; max-width: 90vw; max-height: 80vh; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th, td { padding: 8px; border-bottom: 1px solid #333; font-size: 14px; }
+
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <h2>⚡ FluxTorrent</h2>
+    <div class="menu-item active" onclick="switchView('downloads', this)">⬇️ All Torrents</div>
+    <div class="menu-item" onclick="switchView('search', this)">🔍 Search</div>
+    <div class="menu-item" onclick="switchView('settings', this)">⚙️ Settings</div>
+</div>
+
+<div class="main-content" id="view-downloads">
+    <div id="drop-overlay">
+        <span style="font-size: 40px; margin-bottom: 10px;">📥</span>
+        <span style="font-size: 1.3em; font-weight: bold; color: #4ade80;">Drop .torrent file to download</span>
+    </div>
+
+    <div class="header">
+        <h1>Downloads</h1>
+        <div class="header-actions">
+            <input type="file" id="torrent-file-input" accept=".torrent" style="display: none;" onchange="handleFileSelect(event)">
+            <button class="btn-secondary" onclick="document.getElementById('torrent-file-input').click()">📁 Open .torrent File</button>
+            <button class="btn-add" onclick="showModal()">+ Add Torrent</button>
+        </div>
+    </div>
+
+    
+    <div class="filters" style="margin-bottom: 15px; display: flex; gap: 10px;">
+        <button class="filter-btn active" onclick="setFilter('all', this)">All</button>
+        <button class="filter-btn" onclick="setFilter('downloading', this)">Downloading</button>
+        <button class="filter-btn" onclick="setFilter('completed', this)">Completed</button>
+        <button class="filter-btn" onclick="setFilter('paused', this)">Paused</button>
+    </div>
+    <div id="torrent-list">
+
+        <p style="color: #666; text-align: center; margin-top: 50px;">No active torrents. Add a magnet link or open a .torrent file to start!</p>
+    </div>
+</div>
+
+<div class="main-content" id="view-search" style="display: none;">
+    <div class="header">
+        <h1>Search Torrents</h1>
+    </div>
+    
+    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+        <input type="text" id="search-input" placeholder="Search for movies, games, software..." onkeydown="if (event.key === 'Enter') performSearch();" style="flex-grow: 1; padding: 12px; border-radius: 8px; border: 1px solid #444; background: #121212; color: #fff; font-size: 16px;">
+        <button id="search-btn" class="btn-add" onclick="performSearch()">Search</button>
+    </div>
+    
+    <div id="search-results">
+        <p style="color: #666; text-align: center; margin-top: 50px;">Enter a query to search across all trackers.</p>
+    </div>
+</div>
+
+<div class="main-content" id="view-settings" style="display: none;">
+    <div class="header">
+        <h1>Settings</h1>
+    </div>
+    
+    <div class="torrent-card" style="max-width: 600px;">
+        <h3 style="margin-top: 0; color: #fff; border-bottom: 1px solid #333; padding-bottom: 10px;">⚡ Speed Limits</h3>
+        <p style="color: #888; font-size: 0.9em; margin-bottom: 20px;">Configure global bandwidth limits. Set value to 0 for unlimited speed.</p>
+        
+        <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #ddd;" for="setting-down-limit">Download Speed Limit (KB/s):</label>
+            <input type="number" id="setting-down-limit" min="0" step="10" placeholder="0 = unlimited" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #444; background: #121212; color: #fff; font-size: 15px; box-sizing: border-box;">
+        </div>
+        
+        <div style="margin-bottom: 25px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #ddd;" for="setting-up-limit">Upload Speed Limit (KB/s):</label>
+            <input type="number" id="setting-up-limit" min="0" step="10" placeholder="0 = unlimited" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #444; background: #121212; color: #fff; font-size: 15px; box-sizing: border-box;">
+        </div>
+        
+        
+        <h3 style="margin-top: 30px; color: #fff; border-bottom: 1px solid #333; padding-bottom: 10px;">⚙️ Advanced Settings</h3>
+        <div style="margin-bottom: 15px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #ddd;">Proxy Type:</label>
+            <select id="setting-proxy-type" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #444; background: #121212; color: #fff;">
+                <option value="None">None</option>
+                <option value="SOCKS5">SOCKS5</option>
+                <option value="HTTP">HTTP</option>
+            </select>
+        </div>
+        <div style="margin-bottom: 15px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #ddd;">Proxy Host:</label>
+            <input type="text" id="setting-proxy-host" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #444; background: #121212; color: #fff; box-sizing: border-box;">
+        </div>
+        <div style="margin-bottom: 15px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #ddd;">Proxy Port:</label>
+            <input type="number" id="setting-proxy-port" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #444; background: #121212; color: #fff; box-sizing: border-box;">
+        </div>
+        <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: bold; color: #ddd;">
+                <input type="checkbox" id="setting-require-encryption"> Require Protocol Encryption
+            </label>
+        </div>
+        <div style="margin-bottom: 25px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #ddd;">Listen Interfaces:</label>
+            <input type="text" id="setting-listen-interfaces" placeholder="0.0.0.0:6881" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #444; background: #121212; color: #fff; box-sizing: border-box;">
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <button class="btn-add" onclick="saveSettings()">Save</button>
+            <span id="settings-status" style="font-size: 0.9em;"></span>
+        </div>
+        
+        <div id="current-settings-display" style="margin-top: 20px; font-size: 0.85em; color: #888; border-top: 1px solid #2a2a2a; padding-top: 15px;">
+            Current Limits: Download unlimited (0 KB/s), Upload unlimited (0 KB/s)
+        </div>
+    </div>
+</div>
+
+
+<div id="details-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; z-index: 200;">
+    <div class="modal-content details-modal">
+        <h3 id="details-title" style="margin-top: 0;">Torrent Details</h3>
+        <div class="tab-header">
+            <button class="tab-btn active" onclick="switchDetailsTab('files')">Files</button>
+            <button class="tab-btn" onclick="switchDetailsTab('peers')">Peers</button>
+            <button class="tab-btn" onclick="switchDetailsTab('trackers')">Trackers</button>
+        </div>
+        <div id="tab-files" class="tab-pane active">
+            <button class="btn-secondary" onclick="saveFilePriorities()" style="margin-bottom: 10px; font-size: 12px; padding: 6px 12px;">Save Priorities</button>
+            <div id="details-files-list"></div>
+        </div>
+        <div id="tab-peers" class="tab-pane">
+            <table>
+                <thead><tr><th>IP</th><th>Client</th><th>Down</th><th>Up</th></tr></thead>
+                <tbody id="details-peers-list"></tbody>
+            </table>
+        </div>
+        <div id="tab-trackers" class="tab-pane">
+            <table>
+                <thead><tr><th>URL</th><th>Status</th></tr></thead>
+                <tbody id="details-trackers-list"></tbody>
+            </table>
+        </div>
+        <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
+            <button class="btn-close" onclick="hideDetailsModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<div id="add-modal">
+    <div class="modal-content">
+        <h3>Add Magnet Link</h3>
+        <input type="text" id="magnet-input" placeholder="magnet:?xt=urn:btih:..." />
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button class="btn-close" onclick="hideModal()">Cancel</button>
+            <button class="btn-add" onclick="addTorrent()">Add</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Issue 3: Notification permission request & completed torrent tracking
+    const notifiedComplete = new Set();
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+    }
+
+    
+    async function copyMagnet(btn, magnetUri) {
+        try {
+            await navigator.clipboard.writeText(magnetUri);
+            const originalText = btn.innerHTML;
+            btn.innerHTML = 'Copied!';
+            setTimeout(() => { btn.innerHTML = originalText; }, 2000);
+        } catch(err) {
+            console.error('Failed to copy', err);
+        }
+    }
+
+    
+    let currentDetailsHash = null;
+
+    function switchDetailsTab(tabName) {
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+        
+        event.target.classList.add('active');
+        document.getElementById(`tab-${tabName}`).classList.add('active');
+        
+        if (currentDetailsHash) {
+            if (tabName === 'files') loadDetailsFiles();
+            else if (tabName === 'peers') loadDetailsPeers();
+            else if (tabName === 'trackers') loadDetailsTrackers();
+        }
+    }
+    
+    function showDetailsModal(hash) {
+        currentDetailsHash = hash;
+        document.getElementById('details-modal').style.display = 'flex';
+        // Auto-load active tab
+        const activeTab = document.querySelector('.tab-pane.active').id;
+        if (activeTab === 'tab-files') loadDetailsFiles();
+        else if (activeTab === 'tab-peers') loadDetailsPeers();
+        else if (activeTab === 'tab-trackers') loadDetailsTrackers();
+    }
+    
+    function hideDetailsModal() {
+        document.getElementById('details-modal').style.display = 'none';
+        currentDetailsHash = null;
+    }
+    
+    async function loadDetailsFiles() {
+        if (!currentDetailsHash) return;
+        try {
+            const res = await fetch(`/api/torrents/${currentDetailsHash}/files`);
+            const files = await res.json();
+            let html = '<table><thead><tr><th><input type="checkbox" onchange="toggleAllFiles(this.checked)"></th><th>Name</th><th>Size</th><th>Progress</th></tr></thead><tbody>';
+            files.forEach((f, idx) => {
+                const checked = f.priority > 0 ? 'checked' : '';
+                html += `<tr>
+                    <td><input type="checkbox" class="file-cb" data-idx="${idx}" ${checked}></td>
+                    <td style="word-break: break-all;">${escapeHtml(f.name)} <button class="btn-add" style="margin-left: 10px; padding: 2px 8px; font-size: 11px;" onclick="playFile('${currentDetailsHash}', ${idx})">▶ Play</button></td>
+                    <td>${formatSize(f.size)}</td>
+                    <td>${(f.progress * 100).toFixed(1)}%</td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+            document.getElementById('details-files-list').innerHTML = html;
+        } catch(e) { console.error(e); }
+    }
+    
+    
+    async function playFile(hash, idx) {
+        try {
+            await fetch(`/api/torrents/${hash}/files/${idx}/play`, { method: 'POST' });
+        } catch(e) {
+            console.error('Play error', e);
+        }
+    }
+
+    function toggleAllFiles(checked) {
+        document.querySelectorAll('.file-cb').forEach(cb => cb.checked = checked);
+    }
+    
+    async function saveFilePriorities() {
+        if (!currentDetailsHash) return;
+        const checkboxes = document.querySelectorAll('.file-cb');
+        const priorities = [];
+        checkboxes.forEach(cb => {
+            priorities[parseInt(cb.dataset.idx)] = cb.checked ? 1 : 0;
+        });
+        
+        try {
+            await fetch(`/api/torrents/${currentDetailsHash}/files`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ priorities })
+            });
+            alert('Priorities saved!');
+        } catch(e) { console.error(e); }
+    }
+    
+    async function loadDetailsPeers() {
+        if (!currentDetailsHash) return;
+        try {
+            const res = await fetch(`/api/torrents/${currentDetailsHash}/peers`);
+            const peers = await res.json();
+            let html = '';
+            peers.forEach(p => {
+                html += `<tr>
+                    <td>${escapeHtml(p.ip)}</td>
+                    <td>${escapeHtml(p.client)}</td>
+                    <td>${formatSpeed(p.down_speed)}</td>
+                    <td>${formatSpeed(p.up_speed)}</td>
+                </tr>`;
+            });
+            document.getElementById('details-peers-list').innerHTML = html;
+        } catch(e) { console.error(e); }
+    }
+    
+    async function loadDetailsTrackers() {
+        if (!currentDetailsHash) return;
+        try {
+            const res = await fetch(`/api/torrents/${currentDetailsHash}/trackers`);
+            const trackers = await res.json();
+            let html = '';
+            trackers.forEach(t => {
+                html += `<tr>
+                    <td style="word-break: break-all;">${escapeHtml(t.url)}</td>
+                    <td>${escapeHtml(t.status || 'unknown')}</td>
+                </tr>`;
+            });
+            document.getElementById('details-trackers-list').innerHTML = html;
+        } catch(e) { console.error(e); }
+    }
+    
+    async function toggleSequential(hash, isSequential) {
+        try {
+            await fetch(`/api/torrents/${hash}/sequential`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ sequential: isSequential })
+            });
+        } catch(e) { console.error(e); }
+    }
+
+    function showModal() { document.getElementById('add-modal').style.display = 'flex'; }
+    function hideModal() { document.getElementById('add-modal').style.display = 'none'; }
+    
+    // Issue 2: Switch view supporting 'downloads', 'search', 'settings'
+    function switchView(viewName, element) {
+        document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
+        if (element) {
+            element.classList.add('active');
+        } else {
+            const items = document.querySelectorAll('.sidebar .menu-item');
+            if (viewName === 'downloads' && items[0]) items[0].classList.add('active');
+            if (viewName === 'search' && items[1]) items[1].classList.add('active');
+            if (viewName === 'settings' && items[2]) items[2].classList.add('active');
+        }
+        
+        document.getElementById('view-downloads').style.display = viewName === 'downloads' ? 'block' : 'none';
+        document.getElementById('view-search').style.display = viewName === 'search' ? 'block' : 'none';
+        document.getElementById('view-settings').style.display = viewName === 'settings' ? 'block' : 'none';
+
+        if (viewName === 'settings') {
+            loadSettings();
+        }
+    }
+
+    // Issue 7: Pass torrent name when adding from search results
+    
+    async function streamFromSearch(btn, magnet, name) {
+        btn.textContent = '⏳ Loading...';
+        btn.disabled = true;
+        
+        try {
+            // 1. Add the torrent
+            const addRes = await fetch('/api/torrents', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({magnet, save_path: './downloads'})
+            });
+            const hash = await addRes.text();
+            
+            // 2. Poll until metadata is ready
+            let attempts = 0;
+            const checkInterval = setInterval(async () => {
+                attempts++;
+                if (attempts > 60) { // 60 seconds timeout
+                    clearInterval(checkInterval);
+                    btn.textContent = '🎬 Stream';
+                    btn.disabled = false;
+                    alert('Timed out waiting for metadata. The torrent might have no seeders.');
+                    return;
+                }
+                
+                try {
+                    const stateRes = await fetch(`/api/torrents/${hash}`);
+                    if (!stateRes.ok) return;
+                    const state = await stateRes.json();
+                    
+                    if (state.state !== 'downloading metadata') {
+                        clearInterval(checkInterval);
+                        btn.textContent = '🎬 Stream';
+                        btn.disabled = false;
+                        
+                        // 3. Fetch files
+                        const filesRes = await fetch(`/api/torrents/${hash}/files`);
+                        const files = await filesRes.json();
+                        
+                        // 4. Find biggest video file
+                        const videoExts = ['.mp4', '.mkv', '.avi', '.mov', '.webm'];
+                        let bestFileIndex = -1;
+                        let maxSize = 0;
+                        
+                        files.forEach((f, index) => {
+                            const ext = f.path.substring(f.path.lastIndexOf('.')).toLowerCase();
+                            if (videoExts.includes(ext) && f.size > maxSize) {
+                                maxSize = f.size;
+                                bestFileIndex = index;
+                            }
+                        });
+                        
+                        if (bestFileIndex !== -1) {
+                            // 5. Call Play API
+                            await fetch(`/api/torrents/${hash}/files/${bestFileIndex}/play`, { method: 'POST' });
+                            switchTab('downloads');
+                        } else {
+                            alert('No video files found in this torrent.');
+                        }
+                    }
+                } catch (e) {
+                    console.error("Polling error:", e);
+                }
+            }, 1000);
+            
+        } catch (e) {
+            btn.textContent = '🎬 Stream';
+            btn.disabled = false;
+            alert('Failed to start streaming: ' + e);
+        }
+    }
+
+async function addTorrent(magnetOverride, nameOverride) {
+        const rawMagnet = magnetOverride || document.getElementById('magnet-input').value;
+        const magnet = rawMagnet ? rawMagnet.trim() : '';
+        if (!magnet) return;
+        
+        const payload = { magnet };
+        if (nameOverride) {
+            payload.name = nameOverride;
+        }
+
+        try {
+            const res = await fetch('/api/torrents', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            
+            const data = await res.json();
+            if (!res.ok) {
+                alert("Failed to add torrent: " + (data.message || "Unknown error"));
+                return;
+            }
+            
+            if (!magnetOverride) {
+                document.getElementById('magnet-input').value = '';
+                hideModal();
+            } else {
+                switchView('downloads', document.querySelectorAll('.menu-item')[0]);
+            }
+            fetchTorrents();
+        } catch (e) {
+            alert("Network error while adding torrent: " + e.message);
+        }
+    }
+
+    // Issue 4 & 5: File upload handler using FileReader and FormData
+    function uploadTorrentFile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+            try {
+                const blob = new Blob([e.target.result], { type: 'application/x-bittorrent' });
+                const formData = new FormData();
+                formData.append('file', blob, file.name);
+
+                const res = await fetch('/api/torrents/file', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (res.ok) {
+                    fetchTorrents();
+                } else {
+                    console.error('Failed to upload torrent file');
+                }
+            } catch (err) {
+                console.error('Error uploading torrent file:', err);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    function handleFileSelect(event) {
+        const file = event.target.files && event.target.files[0];
+        if (file) {
+            uploadTorrentFile(file);
+            event.target.value = '';
+        }
+    }
+
+    // Issue 4: Drag and drop support on view-downloads
+    const dropZone = document.getElementById('view-downloads');
+    const dropOverlay = document.getElementById('drop-overlay');
+    if (dropZone) {
+        let dragCounter = 0;
+
+        dropZone.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            dragCounter++;
+            if (dropOverlay) dropOverlay.style.display = 'flex';
+        });
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            if (dropOverlay) dropOverlay.style.display = 'flex';
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dragCounter--;
+            if (dragCounter <= 0) {
+                dragCounter = 0;
+                if (dropOverlay) dropOverlay.style.display = 'none';
+            }
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dragCounter = 0;
+            if (dropOverlay) dropOverlay.style.display = 'none';
+            const files = e.dataTransfer && e.dataTransfer.files;
+            if (files && files.length > 0) {
+                uploadTorrentFile(files[0]);
+            }
+        });
+    }
+
+    function formatSpeed(bytes) {
+        if(bytes === 0) return "0 B/s";
+        const k = 1024;
+        const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+    
+    function formatSize(bytes) {
+        if(bytes === 0) return "0 B";
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    // Issue 2: Settings management
+    async function loadSettings() {
+        try {
+            const res = await fetch('/api/settings');
+            if (res.ok) {
+                const data = await res.json();
+                const down = data.download_limit !== undefined ? data.download_limit : (data.download_rate_limit ? Math.round(data.download_rate_limit / 1024) : 0);
+                const up = data.upload_limit !== undefined ? data.upload_limit : (data.upload_rate_limit ? Math.round(data.upload_rate_limit / 1024) : 0);
+                
+                document.getElementById('setting-down-limit').value = down;
+                document.getElementById('setting-up-limit').value = up;
+                document.getElementById('setting-proxy-type').value = data.proxy_type || 'None';
+                document.getElementById('setting-proxy-host').value = data.proxy_host || '';
+                document.getElementById('setting-proxy-port').value = data.proxy_port || '';
+                document.getElementById('setting-require-encryption').checked = !!data.require_encryption;
+                document.getElementById('setting-listen-interfaces').value = data.listen_interfaces || '';
+
+                displayCurrentLimits(down, up);
+            }
+        } catch(e) {
+            console.error('Failed to load settings:', e);
+        }
+    }
+
+    function displayCurrentLimits(down, up) {
+        const displayEl = document.getElementById('current-settings-display');
+        if (displayEl) {
+            const downText = down > 0 ? `${down} KB/s` : 'unlimited (0 KB/s)';
+            const upText = up > 0 ? `${up} KB/s` : 'unlimited (0 KB/s)';
+            displayEl.innerHTML = `Current Limits: Download ${downText}, Upload ${upText}`;
+        }
+    }
+
+    async function saveSettings() {
+        const downInput = document.getElementById('setting-down-limit');
+        const upInput = document.getElementById('setting-up-limit');
+        const statusEl = document.getElementById('settings-status');
+        
+        const download_limit = parseInt(downInput.value, 10) || 0;
+        const upload_limit = parseInt(upInput.value, 10) || 0;
+        const proxy_type = document.getElementById('setting-proxy-type').value;
+        const proxy_host = document.getElementById('setting-proxy-host').value;
+        const proxy_port = parseInt(document.getElementById('setting-proxy-port').value, 10) || 0;
+        const require_encryption = document.getElementById('setting-require-encryption').checked;
+        const listen_interfaces = document.getElementById('setting-listen-interfaces').value;
+        
+        try {
+            const res = await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    download_limit, upload_limit,
+                    proxy_type, proxy_host, proxy_port,
+                    require_encryption, listen_interfaces
+                })
+            });
+
+            
+            if (res.ok) {
+                displayCurrentLimits(download_limit, upload_limit);
+                if (statusEl) {
+                    statusEl.textContent = 'Settings saved!';
+                    statusEl.style.color = '#4ade80';
+                }
+            } else {
+                if (statusEl) {
+                    statusEl.textContent = 'Failed to save settings.';
+                    statusEl.style.color = '#ef4444';
+                }
+            }
+        } catch (e) {
+            if (statusEl) {
+                statusEl.textContent = 'Error: ' + e.message;
+                statusEl.style.color = '#ef4444';
+            }
+        }
+        if (statusEl) {
+            setTimeout(() => { statusEl.textContent = ''; }, 3000);
+        }
+    }
+
+    async function performSearch() {
+        const query = document.getElementById('search-input').value.trim();
+        const searchBtn = document.getElementById('search-btn');
+        const resultsDiv = document.getElementById('search-results');
+        if(!query) {
+            resultsDiv.innerHTML = '<p style="color: #666; text-align: center; margin-top: 50px;">Enter a query to search across all trackers.</p>';
+            return;
+        }
+        
+        searchBtn.disabled = true;
+        searchBtn.innerHTML = '<span>Searching top trackers...</span>';
+        resultsDiv.innerHTML = '<div id="live-search-container"></div>';
+        const liveContainer = document.getElementById('live-search-container');
+        
+        const startTime = performance.now();
+        let resultCount = 0;
+
+        const evtSource = new EventSource('/api/search?q=' + encodeURIComponent(query));
+        
+        evtSource.onmessage = function(event) {
+            try {
+                const r = JSON.parse(event.data);
+                resultCount++;
+                const safeMagnet = encodeURIComponent(r.magnet).replace(/'/g, "%27");
+                const safeName = encodeURIComponent(r.name).replace(/'/g, "%27");
+                
+                const card = document.createElement('div');
+                card.className = 'torrent-card';
+                card.style = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 10px;';
+                card.innerHTML = `
+                    <div style="flex-grow: 1; padding-right: 20px;">
+                        <div class="torrent-name" style="margin-bottom: 8px;">${escapeHtml(r.name)}</div>
+                        <div class="torrent-stats">
+                            <span>📦 ${formatSize(r.size)}</span>
+                            <span style="color: #4ade80;">🌱 ${r.seeders}</span>
+                            <span style="color: #f87171;"> leechers: ${r.leechers}</span>
+                            <span style="color: #888;">Tracker: ${escapeHtml(r.source)}</span>
+                        </div>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <button class="btn-add" style="background: #a855f7; padding: 6px 12px; font-size: 13px;" onclick="copyMagnet(this, decodeURIComponent('${safeMagnet}'))">📋 Copy Magnet</button>
+                        <button class="btn-add" onclick="addTorrent(decodeURIComponent('${safeMagnet}'), decodeURIComponent('${safeName}'))">Download</button>
+                        <button class="btn-add" style="background: #eab308; padding: 6px 12px; font-size: 13px; color: #000;" onclick="streamFromSearch(this, decodeURIComponent('${safeMagnet}'), decodeURIComponent('${safeName}'))">🎬 Stream</button>
+                    </div>
+                `;
+                liveContainer.appendChild(card);
+            } catch (e) {
+                console.error("Failed to parse SSE data:", e);
+            }
+        };
+        
+        evtSource.addEventListener("DONE", function() {
+            evtSource.close();
+            finishSearch();
+        });
+
+        evtSource.onerror = function() {
+            evtSource.close();
+            finishSearch();
+        };
+        
+        function finishSearch() {
+            const endTime = performance.now();
+            const timeTaken = ((endTime - startTime) / 1000).toFixed(2);
+            searchBtn.disabled = false;
+            searchBtn.innerHTML = 'Search';
+            
+            if(resultCount === 0) {
+                resultsDiv.innerHTML = `<p style="color: #666; text-align: center; margin-top: 50px;">No results found. (Took ${timeTaken}s)</p>`;
+            } else {
+                const summary = document.createElement('p');
+                summary.style = "color: #4ade80; margin-bottom: 15px; font-size: 14px;";
+                summary.innerText = `Finished. Found ${resultCount} results in ${timeTaken} seconds.`;
+                resultsDiv.insertBefore(summary, liveContainer);
+            }
+        }
+    }
+
+    
+    function createTorrentCard(t) {
+        const card = document.createElement('div');
+        card.className = 'torrent-card';
+        card.dataset.hash = t.hash;
+        
+        card.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                <div class="torrent-name">${escapeHtml(t.name)}</div>
+                <div class="torrent-status ${t.state}">${t.state}</div>
+            </div>
+            <div class="progress-bg">
+                <div class="progress-fill" style="width: ${Math.max(0, Math.min(100, t.progress))}%"></div>
+            </div>
+            <div class="torrent-stats">
+                <span>📦 ${formatSize(t.size)}</span>
+                <span class="stat-progress">${t.progress.toFixed(1)}%</span>
+                <span class="stat-down">⬇️ ${formatSpeed(t.download_rate)}</span>
+                <span class="stat-up">⬆️ ${formatSpeed(t.upload_rate)}</span>
+                <span class="stat-peers">👥 ${t.num_peers} peers</span>
+                <span class="stat-eta">⏳ ${formatETA(t.eta)}</span>
+            </div>
+            <div class="torrent-actions">
+                <button class="btn-add" onclick="actionTorrent('${t.hash}', 'pause')">Pause</button>
+                <button class="btn-add" onclick="actionTorrent('${t.hash}', 'resume')">Resume</button>
+                <button class="btn-remove" onclick="actionTorrent('${t.hash}', 'remove_keep')">Remove</button>
+                <button class="btn-remove" onclick="actionTorrent('${t.hash}', 'remove_delete')">Delete Data</button>
+                <button class="btn-add" style="background: #a855f7" onclick="copyMagnet(this, '${t.magnet_uri}')">📋 Copy Magnet</button>
+                <button class="btn-add" style="background: #3b82f6" onclick="showDetails('${t.hash}')">ℹ️ Details</button>
+                <label style="font-size: 13px; color: #ccc; display: flex; align-items: center; gap: 5px;">
+                    <input type="checkbox" onchange="toggleSequential('${t.hash}', this.checked)" ${t.sequential_download ? 'checked' : ''}> Sequential
+                </label>
+            </div>
+        `;
+        return card;
+    }
+
+    function updateTorrentCard(card, t) {
+        card.querySelector('.torrent-name').innerText = t.name;
+        
+        const statusEl = card.querySelector('.torrent-status');
+        statusEl.className = 'torrent-status ' + t.state;
+        statusEl.innerText = t.state;
+        
+        card.querySelector('.progress-fill').style.width = Math.max(0, Math.min(100, t.progress)) + '%';
+        
+        card.querySelector('.stat-progress').innerText = t.progress.toFixed(1) + '%';
+        card.querySelector('.stat-down').innerText = '⬇️ ' + formatSpeed(t.download_rate);
+        card.querySelector('.stat-up').innerText = '⬆️ ' + formatSpeed(t.upload_rate);
+        card.querySelector('.stat-peers').innerText = '👥 ' + t.num_peers + ' peers';
+        card.querySelector('.stat-eta').innerText = '⏳ ' + formatETA(t.eta);
+    }
+
+    async function fetchTorrents() {
+        try {
+            const res = await fetch('/api/torrents');
+            if (!res.ok) return;
+            const torrents = await res.json();
+            
+            // Issue 3: Download complete notification
+            torrents.forEach(t => {
+                if (t.progress >= 100 && !notifiedComplete.has(t.hash)) {
+                    notifiedComplete.add(t.hash);
+                    if ('Notification' in window && Notification.permission === 'granted') {
+                        new Notification('Download Complete', { body: t.name });
+                    }
+                }
+            });
+
+            const list = document.getElementById('torrent-list');
+            if (!list) return;
+
+            if (torrents.length === 0) {
+                list.innerHTML = '<p style="color: #666; text-align: center; margin-top: 50px;">No active torrents. Add a magnet link or open a .torrent file to start!</p>';
+                return;
+            }
+
+            // Remove empty placeholder paragraph if present
+            const placeholder = list.querySelector('p');
+            if (placeholder && list.children.length === 1) {
+                list.innerHTML = '';
+            }
+
+            // Apply filter
+            if (currentFilter !== 'all') {
+                torrents = torrents.filter(t => {
+                    if (currentFilter === 'completed') return t.progress >= 100 || t.state === 'finished' || t.state === 'seeding';
+                    if (currentFilter === 'downloading') return t.progress < 100 && t.state !== 'paused' && t.state !== 'finished' && t.state !== 'seeding';
+                    if (currentFilter === 'paused') return t.state === 'paused';
+                    return true;
+                });
+            }
+            
+            const currentHashes = new Set(torrents.map(t => t.hash));
+
+            // Remove cards for torrents that no longer exist
+            
+            const existingCards = list.querySelectorAll('.torrent-card[data-hash]');
+
+            existingCards.forEach(card => {
+                if (!currentHashes.has(card.dataset.hash)) {
+                    card.remove();
+                }
+            });
+
+            // Update existing cards or append new ones
+            torrents.forEach(t => {
+                const card = list.querySelector(`.torrent-card[data-hash="${t.hash}"]`);
+                if (card) {
+                    updateTorrentCard(card, t);
+                } else {
+                    const newCard = createTorrentCard(t);
+                    list.appendChild(newCard);
+                }
+            });
+        } catch(e) {
+            console.error('Error fetching torrents:', e);
+        }
+    }
+
+    // Issue 6: Remove torrent with keep_files=true option or delete files option
+    async function actionTorrent(hash, action) {
+        if (action === 'remove_delete') {
+            if (!confirm("Are you sure you want to remove this torrent and delete its files?")) return;
+            await fetch(`/api/torrents/${hash}`, {
+                method: 'DELETE'
+            });
+        } else if (action === 'remove_keep') {
+            if (!confirm("Are you sure you want to remove this torrent? (Downloaded files will be kept)")) return;
+            await fetch(`/api/torrents/${hash}?keep_files=true`, {
+                method: 'DELETE'
+            });
+        } else if (action === 'pause' || action === 'resume') {
+            await fetch(`/api/torrents/${hash}/${action}`, {
+                method: 'POST'
+            });
+        }
+        fetchTorrents();
+    }
+
+    loadSettings();
+    setInterval(fetchTorrents, 1000);
+    fetchTorrents();
+</script>
+
+</body>
+</html>

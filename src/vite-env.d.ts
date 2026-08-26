@@ -1,5 +1,12 @@
 interface AppSettings {
   downloadPath: string
+  maxActiveDownloads?: number
+  categories?: Record<string, string>
+  scheduledThrottleEnabled?: boolean
+  scheduledThrottleStart?: string
+  scheduledThrottleEnd?: string
+  scheduledDownloadLimit?: number
+  scheduledUploadLimit?: number
   downloadLimit: number
   uploadLimit: number
   startOnBoot: boolean
@@ -11,7 +18,7 @@ interface AppSettings {
 interface Window {
   ipcRenderer: import('electron').IpcRenderer
   torrentApi: {
-    addTorrent: (torrentId: string) => Promise<{ infoHash: string }>
+    addTorrent: (torrentId: string, customPath?: string) => Promise<{ infoHash: string }>
     getTorrentsStatus: (expandedHash?: string) => Promise<Record<string, unknown>[]>
     removeTorrent: (infoHash: string) => Promise<void>
     pauseTorrent: (infoHash: string) => Promise<void>
@@ -19,6 +26,7 @@ interface Window {
     getSettings: () => Promise<AppSettings>
     saveSettings: (settings: Partial<AppSettings>) => Promise<AppSettings>
     selectFolder: () => Promise<string | null>
+    seedFolder: (folderPath: string) => Promise<string>
     openFolder: (path: string) => Promise<void>
     toggleDevTools: () => Promise<void>
     copyToClipboard: (text: string) => Promise<void>

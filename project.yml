@@ -1,0 +1,54 @@
+name: FluxTorrent
+options:
+  bundleIdPrefix: com.fluxtorrent
+targets:
+  FluxTorrent:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - FluxTorrent
+    settings:
+      CODE_SIGN_IDENTITY: "-"
+      CODE_SIGN_STYLE: Manual
+    info:
+      path: FluxTorrent/Info.plist
+      properties:
+        NSPrincipalClass: NSApplication
+        NSHighResolutionCapable: true
+        LSMinimumSystemVersion: 14.0
+        CFBundleURLTypes:
+          - CFBundleURLName: "Magnet Link"
+            CFBundleURLSchemes: ["magnet"]
+    preBuildScripts:
+      - script: |
+          mkdir -p "${SRCROOT}/cpp/build"
+          cd "${SRCROOT}/cpp/build"
+          cmake ..
+          make -j4
+        name: Build C++ Backend
+    postBuildScripts:
+      - script: |
+          echo "Copying C++ backend and resources..."
+          mkdir -p "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/public"
+          cp "${SRCROOT}/cpp/build/torrent_client" "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/"
+          cp -R "${SRCROOT}/cpp/public/"* "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/public/"
+          
+          echo "Copying Frameworks..."
+          mkdir -p "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks"
+          cp /opt/homebrew/opt/libtorrent-rasterbar/lib/libtorrent-rasterbar.2.1.dylib "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks/"
+          cp /opt/homebrew/opt/openssl@3/lib/libssl.3.dylib "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks/"
+          cp /opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks/"
+          
+          echo "Fixing dylib paths..."
+          install_name_tool -change /opt/homebrew/opt/libtorrent-rasterbar/lib/libtorrent-rasterbar.2.1.dylib @executable_path/../Frameworks/libtorrent-rasterbar.2.1.dylib "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/torrent_client"
+          install_name_tool -change /opt/homebrew/opt/openssl@3/lib/libssl.3.dylib @executable_path/../Frameworks/libssl.3.dylib "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/torrent_client"
+          install_name_tool -change /opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib @executable_path/../Frameworks/libcrypto.3.dylib "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/torrent_client"
+          install_name_tool -change /opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib @executable_path/../Frameworks/libcrypto.3.dylib "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks/libssl.3.dylib"
+          
+          echo "Signing binaries..."
+          codesign -f -s - "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks/libcrypto.3.dylib" || true
+          codesign -f -s - "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks/libssl.3.dylib" || true
+          codesign -f -s - "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks/libtorrent-rasterbar.2.1.dylib" || true
+          codesign -f -s - "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/torrent_client" || true
+        name: Bundle Resources and Dylibs

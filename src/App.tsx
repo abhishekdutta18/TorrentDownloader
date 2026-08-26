@@ -80,6 +80,7 @@ function App() {
   const [torrents, setTorrents] = useState<Torrent[]>([])
   const [showAddModal, setShowAddModal] = useState(false)
   const [magnetLink, setMagnetLink] = useState('')
+  const [customSavePath, setCustomSavePath] = useState('')
   const [error, setError] = useState('')
   type Tab = 'downloading' | 'completed' | 'search' | 'stats' | 'settings'
   const [activeTab, setActiveTab] = useState<Tab>('downloading')
@@ -94,6 +95,9 @@ function App() {
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
+  const [sortBy, setSortBy] = useState<'name' | 'size' | 'progress' | 'speed' | 'added'>('added')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+  const [filterText, setFilterText] = useState('')
   const [hasSearched, setHasSearched] = useState(false)
 
   // Speed history for chart (last 60 seconds)
@@ -198,7 +202,7 @@ function App() {
     try {
       setError('')
       if (window.torrentApi) {
-        const res = await window.torrentApi.addTorrent(target)
+        const res = await window.torrentApi.addTorrent(target, customSavePath || undefined)
         if (res && res.infoHash) {
           const existing = torrents.find(t => t.infoHash === res.infoHash)
           if (existing && existing.done) {
@@ -225,6 +229,22 @@ function App() {
     if (activeTab === 'downloading') return !t.done
     if (activeTab === 'completed') return t.done
     return true
+  }).filter(t => {
+    if (!filterText) return true
+    return (t.name || '').toLowerCase().includes(filterText.toLowerCase())
+  }).sort((a, b) => {
+    let cmp = 0;
+    if (sortBy === 'name') cmp = (a.name || '').localeCompare(b.name || '');
+    else if (sortBy === 'size') cmp = a.length - b.length;
+    else if (sortBy === 'progress') cmp = a.progress - b.progress;
+    else if (sortBy === 'speed') cmp = (a.downloadSpeed + a.uploadSpeed) - (b.downloadSpeed + b.uploadSpeed);
+    // 'added' can just use the original order or 'created' field if available
+    else if (sortBy === 'added') {
+        const dateA = a.created ? new Date(a.created).getTime() : 0;
+        const dateB = b.created ? new Date(b.created).getTime() : 0;
+        cmp = dateA - dateB;
+    }
+    return sortOrder === 'asc' ? cmp : -cmp;
   })
 
   const handlePauseAll = () => {
@@ -387,6 +407,37 @@ function App() {
             </div>
           </div>
         </header>
+        { (activeTab === 'downloading' || activeTab === 'completed') && (
+        <div className="px-6 pt-4 flex space-x-4 items-center">
+            <input 
+              type="text" 
+              placeholder="Filter torrents..." 
+              value={filterText}
+              onChange={e => setFilterText(e.target.value)}
+              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500 w-64"
+            />
+            <div className="flex items-center space-x-2 text-sm">
+                <span className="text-gray-400">Sort:</span>
+                <select 
+                  value={sortBy} 
+                  onChange={e => setSortBy(e.target.value as any)}
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-gray-200 focus:outline-none focus:border-blue-500"
+                >
+                    <option value="added">Date Added</option>
+                    <option value="name">Name</option>
+                    <option value="size">Size</option>
+                    <option value="progress">Progress</option>
+                    <option value="speed">Speed</option>
+                </select>
+                <button 
+                  onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                  className="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg border border-gray-700"
+                >
+                    {sortOrder === 'asc' ? '↑' : '↓'}
+                </button>
+            </div>
+        </div>
+        )}
         <main className="flex-1 overflow-auto p-6 space-y-4">
           {activeTab === 'search' ? (
             <div className="max-w-4xl mx-auto h-full flex flex-col">
@@ -809,6 +860,30 @@ function App() {
                     placeholder="magnet:?xt=urn:btih:... or https://..."
                     autoFocus
                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1">Save Location (Leave blank for default)</label>
+                  <div className="flex space-x-2">
+                    <input 
+                      type="text" 
+                      value={customSavePath}
+                      onChange={(e) => setCustomSavePath(e.target.value)}
+                      className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-shadow placeholder-gray-600"
+                      placeholder="e.g. /Users/name/Downloads"
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const folder = await window.torrentApi?.selectFolder();
+                        if (folder) setCustomSavePath(folder);
+                      }}
+                      className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-200 transition-colors"
+                    >
+                      Browse...
+                    </button>
+                  </div>
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-gray-400 mb-1">Or select a .torrent file</label>
                   <div className="flex gap-2">
                     <button
@@ -818,7 +893,7 @@ function App() {
                           const path = await window.torrentApi.openTorrentDialog()
                           if (path) {
                             try {
-                              await window.torrentApi.addTorrent(path)
+                              await window.torrentApi.addTorrent(path, customSavePath || undefined)
                               setShowAddModal(false)
                             } catch (err: any) {
                               setError(err.message || String(err))
