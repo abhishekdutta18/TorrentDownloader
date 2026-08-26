@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+echo "Building web client..."
+npm install --legacy-peer-deps
+npm run build
+rm -rf cpp/public/*
+cp -r dist/* cpp/public/
+
 # Generate project
 echo "Generating Xcode project..."
 xcodegen generate

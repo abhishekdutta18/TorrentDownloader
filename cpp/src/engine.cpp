@@ -370,6 +370,7 @@ std::vector<Engine::FileInfo> Engine::get_torrent_files(const std::string& info_
                     FileInfo fi;
                     fi.index = i;
                     fi.name = std::string(tf->files().file_name(lt::file_index_t(i)));
+                    fi.path = tf->files().file_path(lt::file_index_t(i));
                     fi.size = tf->files().file_size(lt::file_index_t(i));
                     fi.progress = fi.size > 0 ? static_cast<float>(progress[i]) / fi.size : 1.0f;
                     fi.priority = (i < priorities.size()) ? static_cast<uint8_t>(priorities[i]) : 1;

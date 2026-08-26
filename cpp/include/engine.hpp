@@ -15,6 +15,7 @@ namespace torrent {
 struct TorrentState {
     std::string info_hash;
     std::string name;
+    std::string save_path;
     float progress; // 0.0 to 1.0
     int download_rate; // bytes per second
     int upload_rate; // bytes per second
@@ -53,6 +54,8 @@ public:
     struct FileInfo {
         int index;
         std::string name;
+    std::string save_path;
+        std::string path;
         long long size;
         float progress;
         int priority;

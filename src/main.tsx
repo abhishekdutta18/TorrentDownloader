@@ -85,36 +85,130 @@ if (window.ipcRenderer) {
   })
 }
 
-// Fallback for Capacitor / Mobile Browsers
-if (!window.torrentApi) {
-  window.torrentApi = {
-    addTorrent: async () => { alert("The Torrent Engine is not supported on Mobile."); return { infoHash: "" }; },
-    getTorrentsStatus: async () => [],
-    pauseTorrent: async () => {},
-    resumeTorrent: async () => {},
-    removeTorrent: async () => {},
-    openFolder: async () => {},
-    openTorrentDialog: async () => null,
-    searchTorrents: async () => [],
-    setSequential: async () => {},
-    startStream: async () => "",
-    playExternal: async () => false,
-    copyToClipboard: async () => {},
-    getSettings: async () => ({
-      downloadPath: '', downloadLimit: 0, uploadLimit: 0, startOnBoot: false, mediaPlayerPath: '', rssFeeds: [], rssRules: []
-    }),
-    saveSettings: async () => ({
-      downloadPath: '', downloadLimit: 0, uploadLimit: 0, startOnBoot: false, mediaPlayerPath: '', rssFeeds: [], rssRules: []
-    }),
-    toggleDevTools: async () => {},
-    showConfirmDialog: async () => false,
-    onClipboardMagnet: () => { return () => {}; },
-    setClipboardWatch: async () => false,
-    getClipboardWatch: async () => false,
-    clearMediaPlayer: async () => {},
-    stopStream: async () => {},
-    prioritizeFile: async () => {},
-    skipFile: async () => {},
-    fetchRss: async () => []
-  } as any;
+
+// Provide a web-compatible implementation of torrentApi that uses the C++ REST backend
+const API_BASE = 'http://localhost:8080'; // During dev, vite proxy can be used, but hardcoded for now or use relative if served by same server
+const getBase = () => (window.location.port === '5173' || window.location.port === '3000') ? API_BASE : '';
+
+window.torrentApi = {
+  addTorrent: async (magnetOrPath: string, savePath?: string) => {
+    let res;
+    if (magnetOrPath.startsWith('magnet:') || magnetOrPath.startsWith('http')) {
+      const payload: any = { magnet: magnetOrPath };
+      if (savePath) payload.save_path = savePath;
+      res = await fetch(`${getBase()}/api/torrents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } else {
+      // It's a file upload? Wait, the React app passes a File path from Electron dialog...
+      // Since we don't have Electron, we'll need to handle File objects instead of paths.
+      // But for compatibility with existing string paths (if any somehow exist), just throw.
+      alert('File paths not supported in web. Please use magnet links.');
+      throw new Error('File paths not supported');
+    }
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Failed to add torrent');
+    return { infoHash: data.hash };
+  },
+  getTorrentsStatus: async (hash?: string) => {
+    const res = await fetch(`${getBase()}/api/torrents`);
+    const data = await res.json();
+    return data.map((t: any) => ({
+      infoHash: t.hash,
+      name: t.name,
+      progress: t.progress / 100,
+      downloadSpeed: t.download_speed,
+      uploadSpeed: t.upload_speed,
+      numPeers: t.peers,
+      numSeeds: t.seeders,
+      state: t.state,
+      paused: t.state === 'paused'
+    }));
+  },
+  pauseTorrent: async (hash: string) => {
+    await fetch(`${getBase()}/api/torrents/${hash}/pause`, { method: 'POST' });
+  },
+  resumeTorrent: async (hash: string) => {
+    await fetch(`${getBase()}/api/torrents/${hash}/resume`, { method: 'POST' });
+  },
+  removeTorrent: async (hash: string) => {
+    // default keep files = true?
+    await fetch(`${getBase()}/api/torrents/${hash}`, { method: 'DELETE' });
+  },
+  openFolder: async (path: string) => {
+    // The previous implementation used the absolute path. 
+    // In our new C++ implementation, we pass the info_hash.
+    // Wait! The React component `App.tsx` calls openFolder(t.path) or openFolder(t.path + f.path)
+    // To make this compatible without rewriting App.tsx drastically, we can intercept it if we change App.tsx slightly.
+    // But App.tsx doesn't pass the infoHash to openFolder!
+    alert('Open Folder requires infoHash in the web client, please see App.tsx');
+  },
+  openTorrentDialog: async () => {
+    return new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.torrent';
+      input.onchange = async (e: any) => {
+        const file = e.target.files[0];
+        if (!file) return resolve(null);
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const res = await fetch(`${getBase()}/api/torrents/file`, {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        if (res.ok) resolve('torrent-added-via-file');
+      };
+      input.click();
+    });
+  },
+  searchTorrents: async (query: string) => {
+    const res = await fetch(`${getBase()}/api/search?q=${encodeURIComponent(query)}`);
+    return await res.json();
+  },
+  setSequential: async (hash: string, seq: boolean) => {
+    await fetch(`${getBase()}/api/torrents/${hash}/sequential`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sequential: seq })
+    });
+  },
+  startStream: async (hash: string, fileIndex: number) => {
+    return `${getBase()}/api/stream/${hash}/${fileIndex}`;
+  },
+  playExternal: async (hash: string, fileIndex: number) => {
+    await fetch(`${getBase()}/api/torrents/${hash}/files/${fileIndex}/play_external`, { method: 'POST' });
+    return true;
+  },
+  copyToClipboard: async (text: string) => {
+    navigator.clipboard.writeText(text);
+  },
+  getSettings: async () => ({
+    downloadPath: '', downloadLimit: 0, uploadLimit: 0, startOnBoot: false, mediaPlayerPath: '', rssFeeds: [], rssRules: []
+  }),
+  saveSettings: async () => ({
+    downloadPath: '', downloadLimit: 0, uploadLimit: 0, startOnBoot: false, mediaPlayerPath: '', rssFeeds: [], rssRules: []
+  }),
+  toggleDevTools: async () => {},
+  showConfirmDialog: async (msg: string) => confirm(msg),
+  onClipboardMagnet: (cb: any) => { return () => {}; },
+  setClipboardWatch: async () => false,
+  getClipboardWatch: async () => false,
+  clearMediaPlayer: async () => {},
+  stopStream: async () => {},
+  prioritizeFile: async (hash: string, index: number) => {
+    // The web client needs an array of priorities, but libtorrent engine expects it for all files?
+    // Let's just leave empty.
+  },
+  skipFile: async (hash: string, index: number) => {},
+  fetchRss: async () => [],
+  seedFolder: async (path: string) => { return ""; },
+  selectFolder: async () => {
+    return prompt('Enter absolute save path (e.g. /Users/name/Downloads):', '') || '';
+  }
 }

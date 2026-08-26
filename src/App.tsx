@@ -633,9 +633,9 @@ function App() {
                         title="Open Folder"
                         onClick={() => {
                           const isSingleFile = t.files && t.files.length === 1
-                          const hasMetadata = t.name && t.name !== 'Fetching metadata...'
-                          const torrentFolder = (hasMetadata && !isSingleFile && t.path) ? (t.path + '/' + t.name) : t.path!
-                          window.torrentApi.openFolder(torrentFolder)
+                          
+                          
+                          fetch((window.location.port === '5173' ? 'http://localhost:8080' : '') + '/api/torrents/' + t.infoHash + '/open_folder', { method: 'POST' })
                         }}
                       >
                         <FolderOpen size={16} />
@@ -819,9 +819,9 @@ function App() {
                                   onClick={() => {
                                     if (window.torrentApi && t.path && f.path) {
                                       // Construct full file path - path joining handled server-side (#13)
-                                      window.torrentApi.openFolder(t.path + '/' + f.path)
+                                      fetch((window.location.port === '5173' ? 'http://localhost:8080' : '') + '/api/torrents/' + t.infoHash + '/open_folder', { method: 'POST' })
                                     } else if (window.torrentApi && t.path) {
-                                      window.torrentApi.openFolder(t.path)
+                                      fetch((window.location.port === '5173' ? 'http://localhost:8080' : '') + '/api/torrents/' + t.infoHash + '/open_folder', { method: 'POST' })
                                     }
                                   }}
                                   title="Show in Finder"
@@ -893,7 +893,7 @@ function App() {
                           const path = await window.torrentApi.openTorrentDialog()
                           if (path) {
                             try {
-                              await window.torrentApi.addTorrent(path, customSavePath || undefined)
+                              if (path !== 'torrent-added-via-file') await window.torrentApi.addTorrent(path, customSavePath || undefined)
                               setShowAddModal(false)
                             } catch (err: any) {
                               setError(err.message || String(err))

@@ -118,10 +118,119 @@ export function Settings() {
         </div>
       </div>
 
+      
+          <div className="mt-8 pt-6 border-t border-gray-700">
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-md font-medium text-gray-200">Enable Schedule-based Limiting</span>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={settings.scheduledThrottleEnabled || false} 
+                  onChange={(e) => debouncedSave({ scheduledThrottleEnabled: e.target.checked })}
+                  className="sr-only peer" 
+                />
+                <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+            
+            {settings.scheduledThrottleEnabled && (
+              <div className="space-y-4 bg-gray-900/50 p-4 rounded-lg">
+                <div className="flex gap-4">
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-400 mb-1">Start Time</label>
+                    <input type="time" value={settings.scheduledThrottleStart || '09:00'} onChange={(e) => debouncedSave({ scheduledThrottleStart: e.target.value })} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-gray-100" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-400 mb-1">End Time</label>
+                    <input type="time" value={settings.scheduledThrottleEnd || '17:00'} onChange={(e) => debouncedSave({ scheduledThrottleEnd: e.target.value })} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-gray-100" />
+                  </div>
+                </div>
+                <div className="flex gap-4">
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-400 mb-1">Sched. DL Limit (KB/s)</label>
+                    <input type="number" value={settings.scheduledDownloadLimit ? Math.round(settings.scheduledDownloadLimit/1024) : 0} onChange={(e) => { const v = parseInt(e.target.value)||0; debouncedSave({ scheduledDownloadLimit: v > 0 ? v*1024 : 0 }) }} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-gray-100" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-400 mb-1">Sched. UL Limit (KB/s)</label>
+                    <input type="number" value={settings.scheduledUploadLimit ? Math.round(settings.scheduledUploadLimit/1024) : 0} onChange={(e) => { const v = parseInt(e.target.value)||0; debouncedSave({ scheduledUploadLimit: v > 0 ? v*1024 : 0 }) }} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-gray-100" />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+      <div className="bg-gray-800 rounded-xl p-6 border border-gray-700/50 shadow-sm">
+        <h3 className="text-xl font-semibold mb-6 text-gray-100 border-b border-gray-700 pb-2">Categories (Save Paths)</h3>
+        
+        <div className="space-y-4">
+          <div className="flex space-x-2">
+            <input 
+              type="text"
+              id="newCatName"
+              placeholder="Category (e.g. Movies)"
+              className="w-1/3 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-gray-100 focus:outline-none"
+            />
+            <button 
+              onClick={async () => {
+                const nameEl = document.getElementById('newCatName') as HTMLInputElement;
+                const name = nameEl.value.trim();
+                if (!name) return;
+                
+                if (window.torrentApi) {
+                  const folder = await window.torrentApi.selectFolder();
+                  if (folder) {
+                    const newCats = { ...(settings.categories || {}) };
+                    newCats[name] = folder;
+                    debouncedSave({ categories: newCats });
+                    nameEl.value = '';
+                  }
+                }
+              }}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium"
+            >
+              Add Category...
+            </button>
+          </div>
+          
+          <ul className="space-y-2 mt-4">
+            {Object.entries(settings.categories || {}).map(([catName, catPath]) => (
+              <li key={catName} className="flex justify-between items-center bg-gray-900 p-2 rounded border border-gray-700">
+                <div className="flex flex-col truncate pr-4">
+                  <span className="text-sm font-semibold text-gray-200">{catName}</span>
+                  <span className="text-xs text-gray-500 truncate">{catPath}</span>
+                </div>
+                <button 
+                  onClick={() => {
+                    const newCats = { ...settings.categories };
+                    delete newCats[catName];
+                    debouncedSave({ categories: newCats });
+                  }}
+                  className="text-red-400 hover:text-red-300 p-2 shrink-0"
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
       <div className="bg-gray-800 rounded-xl p-6 border border-gray-700/50 shadow-sm">
         <h3 className="text-xl font-semibold mb-6 text-gray-100 border-b border-gray-700 pb-2">Bandwidth Limiting</h3>
         
         <div className="space-y-6">
+
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-2">Max Active Downloads (Queue Limit)</label>
+            <input 
+              type="number" 
+              min="1"
+              max="20"
+              value={settings.maxActiveDownloads || 3}
+              onChange={(e) => debouncedSave({ maxActiveDownloads: parseInt(e.target.value) || 3 })}
+              className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-gray-100 focus:outline-none focus:border-blue-500 transition-colors"
+            />
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-400 mb-2">Global Maximum Upload Speed (KB/s)</label>
             <input 

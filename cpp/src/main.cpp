@@ -172,7 +172,8 @@ int main() {
             std::string torrent_name = body.value("name", "");
             
             const char* home_env = getenv("HOME");
-            std::string base_path = home_env ? std::string(home_env) + "/Downloads" : "/tmp";
+            std::string default_path = home_env ? std::string(home_env) + "/Downloads" : "/tmp";
+            std::string base_path = body.value("save_path", default_path);
             
             // Check if it is an HTTP link instead of a magnet
             if (magnet.rfind("http://", 0) == 0 || magnet.rfind("https://", 0) == 0) {
@@ -275,7 +276,8 @@ int main() {
             }
 
             const char* home_env = getenv("HOME");
-            std::string save_path = home_env ? (std::string(home_env) + "/Downloads") : "/tmp";
+            std::string default_path = home_env ? (std::string(home_env) + "/Downloads") : "/tmp";
+            std::string save_path = req.has_param("save_path") ? req.get_param_value("save_path") : default_path;
 
             std::string hash;
             try {
@@ -424,6 +426,7 @@ void setup_engine_routes(httplib::Server& svr, torrent::Engine& engine) {
             response.push_back({
                 {"index", f.index},
                 {"name", f.name},
+                {"path", f.path},
                 {"size", f.size},
                 {"progress", f.progress},
                 {"priority", f.priority}
@@ -488,6 +491,40 @@ void setup_engine_routes(httplib::Server& svr, torrent::Engine& engine) {
                 engine.set_sequential_download(info_hash, body["sequential"].get<bool>());
             }
             res.set_content(R"({"status":"success"})", "application/json");
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content(json{{"status", "error"}, {"message", e.what()}}.dump(), "application/json");
+        }
+    });
+
+    svr.Post(R"(/api/torrents/([^/]+)/open_folder)", [&engine](const httplib::Request& req, httplib::Response& res) {
+        std::string info_hash = req.matches[1];
+        try {
+            auto state = engine.get_torrent_state(info_hash);
+            std::string full_path = state.save_path + "/" + state.name;
+            std::string cmd = "open -R \"" + full_path + "\"";
+            system(cmd.c_str());
+            res.set_content(R"({"status":"success"})", "application/json");
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content(json{{"status", "error"}, {"message", e.what()}}.dump(), "application/json");
+        }
+    });
+
+    svr.Post(R"(/api/torrents/([^/]+)/files/(\d+)/play_external)", [&engine](const httplib::Request& req, httplib::Response& res) {
+        std::string info_hash = req.matches[1];
+        int file_index = std::stoi(req.matches[2]);
+        try {
+            auto files = engine.get_torrent_files(info_hash);
+            if (file_index >= 0 && file_index < files.size()) {
+                auto state = engine.get_torrent_state(info_hash);
+                std::string full_path = state.save_path + "/" + files[file_index].path;
+                std::string cmd = "open -a VLC \"" + full_path + "\" || open \"" + full_path + "\"";
+                system(cmd.c_str());
+                res.set_content(R"({"status":"success"})", "application/json");
+            } else {
+                throw std::runtime_error("Invalid file index");
+            }
         } catch (const std::exception& e) {
             res.status = 400;
             res.set_content(json{{"status", "error"}, {"message", e.what()}}.dump(), "application/json");
