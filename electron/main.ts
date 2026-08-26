@@ -16,6 +16,7 @@ process.env.APP_ROOT = path.join(__dirname, '..')
 export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
+export const VITE_PUBLIC_DIR = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : path.join(__dirname, '../dist')
 
 export const DEFAULT_ANNOUNCE = [
   'udp://tracker.opentrackr.org:1337/announce',
@@ -127,7 +128,7 @@ function createWindow() {
     width: 1000,
     height: 700,
     titleBarStyle: 'hiddenInset',
-    icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
+    icon: path.join(VITE_PUBLIC_DIR, 'electron-vite.svg'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       nodeIntegration: false,
@@ -458,7 +459,7 @@ app.whenReady().then(() => {
   }
 
   // IPC Handlers
-  ipcMain.handle('add-torrent', async (_event, torrentId) => {
+  ipcMain.handle('add-torrent', async (_event, torrentId, options?: { savePath?: string, category?: string }) => {
     try {
       // Extract infoHash from magnet URI for reliable duplicate detection
       let searchId = torrentId
@@ -477,7 +478,11 @@ app.whenReady().then(() => {
         let torrent: any
         try {
           console.log(`Adding torrent: ${torrentId}`)
-          torrent = client.add(torrentId, { path: store.settings.downloadPath, announce: DEFAULT_ANNOUNCE })
+          
+          // Handle custom savePath
+          const downloadPath = (options && options.savePath) ? options.savePath : store.settings.downloadPath;
+          
+          torrent = client.add(torrentId, { path: downloadPath, announce: DEFAULT_ANNOUNCE })
         } catch (err: any) {
           console.error('Failed to add torrent:', err)
           return reject(err.message || String(err))
@@ -934,7 +939,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('search-torrents', async (_event, query: string) => {
     try {
-      const response = await fetch(`https://apibay.org/q.php?q=${encodeURIComponent(query)}`)
+      const response = await fetch(`https://apibay.org/q.php?q=${encodeURIComponent(query)}&_=${Date.now()}`)
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const data = await response.json()
       // APB returns [{ id: '0' }] when no results found
