@@ -18,7 +18,7 @@ interface AppSettings {
 interface Window {
   ipcRenderer: import('electron').IpcRenderer
   torrentApi: {
-    addTorrent: (torrentId: string, customPath?: string) => Promise<{ infoHash: string }>
+    addTorrent: (torrentId: string, options?: { savePath?: string, category?: string }) => Promise<{ infoHash: string }>
     getTorrentsStatus: (expandedHash?: string) => Promise<Record<string, unknown>[]>
     removeTorrent: (infoHash: string) => Promise<void>
     pauseTorrent: (infoHash: string) => Promise<void>

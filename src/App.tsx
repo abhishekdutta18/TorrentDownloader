@@ -202,7 +202,7 @@ function App() {
     try {
       setError('')
       if (window.torrentApi) {
-        const res = await window.torrentApi.addTorrent(target, customSavePath || undefined)
+        const res = await window.torrentApi.addTorrent(target, customSavePath ? { savePath: customSavePath } : undefined)
         if (res && res.infoHash) {
           const existing = torrents.find(t => t.infoHash === res.infoHash)
           if (existing && existing.done) {
@@ -470,21 +470,37 @@ function App() {
                         <span className="text-red-400">↓ {res.leechers}</span>
                         <span>{formatBytes(res.size)}</span>
                       </div>
-                      <button 
-                        onClick={async () => {
-                          if (window.torrentApi) {
-                            try {
-                              await window.torrentApi.addTorrent(res.magnet)
-                              setActiveTab('downloading')
-                            } catch (e: any) {
-                              setSearchError(e.message)
+                      <div className="flex space-x-2">
+                        <button 
+                          onClick={async () => {
+                            if (window.torrentApi) {
+                              try {
+                                await window.torrentApi.copyToClipboard(res.magnet)
+                              } catch (e: any) {
+                                console.error(e)
+                              }
                             }
-                          }
-                        }}
-                        className="px-3 py-1.5 bg-gray-700 hover:bg-blue-600 text-gray-200 hover:text-white rounded-lg transition-colors text-xs font-medium"
-                      >
-                        Download
-                      </button>
+                          }}
+                          className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg transition-colors text-xs font-medium"
+                        >
+                          Copy Link
+                        </button>
+                        <button 
+                          onClick={async () => {
+                            if (window.torrentApi) {
+                              try {
+                                await window.torrentApi.addTorrent(res.magnet)
+                                setActiveTab('downloading')
+                              } catch (e: any) {
+                                setSearchError(e.message)
+                              }
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-gray-700 hover:bg-blue-600 text-gray-200 hover:text-white rounded-lg transition-colors text-xs font-medium"
+                        >
+                          Download
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -893,7 +909,7 @@ function App() {
                           const path = await window.torrentApi.openTorrentDialog()
                           if (path) {
                             try {
-                              await window.torrentApi.addTorrent(path, customSavePath || undefined)
+                              await window.torrentApi.addTorrent(path, customSavePath ? { savePath: customSavePath } : undefined)
                               setShowAddModal(false)
                             } catch (err: any) {
                               setError(err.message || String(err))
