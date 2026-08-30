@@ -19,6 +19,7 @@ describe('Torrent Downloader UI Tests', () => {
           numPeers: 42,
           paused: false,
           done: false,
+          timeRemaining: 150,
           files: [{ name: 'ubuntu-24.04-desktop-amd64.iso', length: 5000000000 }]
         }
       ]),
@@ -55,6 +56,11 @@ describe('Torrent Downloader UI Tests', () => {
   it('renders application title', async () => {
     render(<App />)
     expect(await screen.findByText(/OmniFlux/i)).toBeDefined()
+  })
+
+  it('correctly formats and displays ETA in seconds', async () => {
+    render(<App />)
+    expect(await screen.findByText(/ETA 2m 30s/i)).toBeDefined()
   })
 
   describe('sanitizeMagnetInput', () => {

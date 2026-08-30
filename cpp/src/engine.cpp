@@ -200,8 +200,15 @@ static TorrentState build_torrent_state(const lt::torrent_handle& handle, const 
         state.magnet_uri += "&dn=" + state.name;
     }
 
-    if (state.download_rate > 0 && state.total_wanted > state.total_done) {
-        state.eta_seconds = static_cast<int>((state.total_wanted - state.total_done) / state.download_rate);
+    std::int64_t remaining = 0;
+    if (state.total_wanted > state.total_done) {
+        remaining = state.total_wanted - state.total_done;
+    } else if (state.total_wanted == 0 && handle.torrent_file() && handle.torrent_file()->total_size() > state.total_done) {
+        remaining = handle.torrent_file()->total_size() - state.total_done;
+    }
+
+    if (state.download_rate > 0 && remaining > 0) {
+        state.eta_seconds = static_cast<int>(remaining / state.download_rate);
     } else {
         state.eta_seconds = 0;
     }

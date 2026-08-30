@@ -56,14 +56,22 @@ function formatBytes(bytes: number, decimals = 2) {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
 }
 
-function formatTime(ms: number) {
-  if (ms === Infinity || isNaN(ms) || ms <= 0) return 'Calculating...'
-  const s = Math.floor(ms / 1000)
+function formatTime(secondsOrMs: number) {
+  if (!secondsOrMs || secondsOrMs <= 0 || !isFinite(secondsOrMs) || isNaN(secondsOrMs)) return 'Calculating...'
+  // In libtorrent, ETA is provided in seconds. In legacy WebTorrent, it was ms.
+  // Values > 100,000 are treated as milliseconds.
+  const s = secondsOrMs > 100000 ? Math.floor(secondsOrMs / 1000) : Math.floor(secondsOrMs)
+  if (s <= 0) return 'Calculating...'
   if (s < 60) return `${s}s`
   const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ${s % 60}s`
+  const remS = s % 60
+  if (m < 60) return `${m}m ${remS}s`
   const h = Math.floor(m / 60)
-  return `${h}h ${m % 60}m`
+  const remM = m % 60
+  if (h < 24) return `${h}h ${remM}m`
+  const d = Math.floor(h / 24)
+  const remH = h % 24
+  return `${d}d ${remH}h`
 }
 
 function App() {
@@ -1203,7 +1211,7 @@ function App() {
                       <span className="text-slate-300">•</span>
                       <span className="text-emerald-600 font-semibold">↓ {formatBytes(t.downloadSpeed)}/s</span>
                       <span className="text-slate-300">•</span>
-                      <span>{t.done ? 'Finished' : `ETA ${formatTime(t.timeRemaining)}`}</span>
+                      <span>{t.done ? 'Finished' : t.paused ? 'Paused' : t.state === 'downloading metadata' ? 'Fetching metadata...' : t.downloadSpeed === 0 ? 'ETA ∞' : `ETA ${formatTime(t.timeRemaining)}`}</span>
                       <span className="text-slate-300">•</span>
                       <span>Seeds: {t.numSeeds || 0} / Peers: {t.numPeers || 0}</span>
                     </div>
