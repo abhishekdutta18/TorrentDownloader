@@ -1,22 +1,23 @@
 # Torrent Downloader
 
-A modern, fast, and feature-rich desktop Torrent client built with Electron, React, Vite, and WebTorrent.
+A modern, fast, and feature-rich desktop Torrent client built with libtorrent-rasterbar (C++), React, and Vite.
 
 ## Features
 
-- 🚀 **Lightning Fast**: Built on WebTorrent and optimized for high performance with minimal memory footprint.
-- 🧲 **Magnet Link Support**: Seamlessly handles magnet links and protocol interception (e.g. `magnet://`).
-- 🎬 **Stream Media**: Built-in HTTP streaming server allows you to play video/audio files directly while they are downloading.
+- 🚀 **Lightning Fast**: Powered by native `libtorrent-rasterbar` engine for maximum throughput, low CPU/RAM overhead, and complete DHT/PEX peer discovery.
+- 🧲 **Magnet Link Support**: Seamlessly handles magnet links, raw info hashes, and protocol interception.
+- 🎬 **Stream Media**: Built-in HTTP streaming server allows you to stream video/audio files directly while they are downloading.
 - 📡 **RSS Automation**: Subscribe to RSS feeds and auto-download torrents based on custom regex rules.
 - ⚙️ **Bandwidth Control**: Throttle your download and upload speeds to manage your network usage.
 - 🎨 **Beautiful UI**: Modern, responsive dark mode interface powered by React and Tailwind-style utility classes.
-- 🔒 **Secure & Cynical**: Fortified against path traversal vulnerabilities, race conditions, and memory leaks.
+- 🔒 **Secure & Reliable**: Native state restoration, fast resume data, and sequential downloading.
 
 ## Technology Stack
 
 - **Frontend**: React, TypeScript, Vite, Lucide Icons
-- **Backend/Desktop**: Electron, Node.js
-- **Torrent Engine**: WebTorrent
+- **Torrent Engine**: libtorrent-rasterbar (C++17)
+- **Backend Server**: Embedded C++ HTTP REST Server (`httplib`)
+- **macOS Client**: Native Swift/WKWebView App (`FluxTorrent.app`)
 
 ## Installation
 

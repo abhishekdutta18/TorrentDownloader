@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
 
-
 export function Settings() {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [saving, setSaving] = useState(false)
@@ -69,135 +68,148 @@ export function Settings() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto w-full space-y-6">
-      <div className="bg-gray-800 rounded-xl p-6 border border-gray-700/50 shadow-sm">
-        <h3 className="text-xl font-semibold mb-6 text-gray-100 border-b border-gray-700 pb-2">Download Locations</h3>
+    <div className="max-w-2xl mx-auto w-full space-y-4 text-xs text-slate-800">
+      
+      {/* Download Locations */}
+      <div className="glass-card bg-white/80 p-5 rounded-2xl border border-white shadow-2xs space-y-4">
+        <h3 className="text-sm font-bold text-slate-900 border-b border-slate-200/70 pb-2">Download & Player Settings</h3>
         
-        <div className="space-y-4">
+        <div className="space-y-3">
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-2">Default Download Path</label>
-            <div className="flex space-x-3">
+            <label className="block font-semibold text-slate-600 mb-1">Default Download Folder</label>
+            <div className="flex gap-2">
               <input 
                 type="text" 
                 value={settings.downloadPath}
                 readOnly
-                className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-gray-300 focus:outline-none"
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-slate-700 font-mono"
               />
               <button 
                 onClick={handleSelectFolder}
-                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg transition-colors font-medium"
+                className="glass-btn px-3 py-1.5 rounded-xl font-semibold text-slate-700 hover:text-slate-900"
               >
                 Change
               </button>
             </div>
           </div>
+
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-2">Preferred External Media Player</label>
-            <div className="flex space-x-3 items-center">
+            <label className="block font-semibold text-slate-600 mb-1">Preferred Media Player</label>
+            <div className="flex gap-2 items-center">
               <input 
                 type="text" 
-                value={settings.mediaPlayerPath || 'Not set (will prompt on first use)'}
+                value={settings.mediaPlayerPath || 'Embedded In-Process OmniPlayer (Default)'}
                 readOnly
-                className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-gray-500 focus:outline-none"
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-slate-700 font-mono"
               />
+              <button 
+                type="button"
+                onClick={() => {
+                  const omniPath = '/Users/nandadulaldutta/Desktop/Media Player/OmniPlayer.app'
+                  setSettings({ ...settings, mediaPlayerPath: omniPath })
+                  debouncedSave({ mediaPlayerPath: omniPath })
+                }}
+                className="glass-btn-primary px-3 py-1.5 rounded-xl font-bold whitespace-nowrap"
+              >
+                Use OmniPlayer
+              </button>
               {settings.mediaPlayerPath && (
                 <button 
                   onClick={async () => {
                     if (window.torrentApi) {
                       await window.torrentApi.clearMediaPlayer()
                       setSettings({ ...settings, mediaPlayerPath: '' })
+                      debouncedSave({ mediaPlayerPath: '' })
                     }
                   }}
-                  className="px-4 py-2 bg-gray-700 hover:bg-red-600 text-gray-200 hover:text-white rounded-lg transition-colors font-medium"
+                  className="glass-btn px-3 py-1.5 rounded-xl font-semibold text-red-600 hover:text-red-700"
                 >
-                  Clear
+                  Reset
                 </button>
               )}
             </div>
           </div>
         </div>
-      </div>
 
-      
-          <div className="mt-8 pt-6 border-t border-gray-700">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-md font-medium text-gray-200">Enable Schedule-based Limiting</span>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={settings.scheduledThrottleEnabled || false} 
-                  onChange={(e) => debouncedSave({ scheduledThrottleEnabled: e.target.checked })}
-                  className="sr-only peer" 
-                />
-                <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-              </label>
-            </div>
-            
-            {settings.scheduledThrottleEnabled && (
-              <div className="space-y-4 bg-gray-900/50 p-4 rounded-lg">
-                <div className="flex gap-4">
-                  <div className="flex-1">
-                    <label className="block text-xs font-medium text-gray-400 mb-1">Start Time</label>
-                    <input type="time" value={settings.scheduledThrottleStart || '09:00'} onChange={(e) => debouncedSave({ scheduledThrottleStart: e.target.value })} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-gray-100" />
-                  </div>
-                  <div className="flex-1">
-                    <label className="block text-xs font-medium text-gray-400 mb-1">End Time</label>
-                    <input type="time" value={settings.scheduledThrottleEnd || '17:00'} onChange={(e) => debouncedSave({ scheduledThrottleEnd: e.target.value })} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-gray-100" />
-                  </div>
-                </div>
-                <div className="flex gap-4">
-                  <div className="flex-1">
-                    <label className="block text-xs font-medium text-gray-400 mb-1">Sched. DL Limit (KB/s)</label>
-                    <input type="number" value={settings.scheduledDownloadLimit ? Math.round(settings.scheduledDownloadLimit/1024) : 0} onChange={(e) => { const v = parseInt(e.target.value)||0; debouncedSave({ scheduledDownloadLimit: v > 0 ? v*1024 : 0 }) }} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-gray-100" />
-                  </div>
-                  <div className="flex-1">
-                    <label className="block text-xs font-medium text-gray-400 mb-1">Sched. UL Limit (KB/s)</label>
-                    <input type="number" value={settings.scheduledUploadLimit ? Math.round(settings.scheduledUploadLimit/1024) : 0} onChange={(e) => { const v = parseInt(e.target.value)||0; debouncedSave({ scheduledUploadLimit: v > 0 ? v*1024 : 0 }) }} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-gray-100" />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-      <div className="bg-gray-800 rounded-xl p-6 border border-gray-700/50 shadow-sm">
-        <h3 className="text-xl font-semibold mb-6 text-gray-100 border-b border-gray-700 pb-2">Categories (Save Paths)</h3>
-        
-        <div className="space-y-4">
-          <div className="flex space-x-2">
-            <input 
-              type="text"
-              id="newCatName"
-              placeholder="Category (e.g. Movies)"
-              className="w-1/3 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-gray-100 focus:outline-none"
-            />
-            <button 
-              onClick={async () => {
-                const nameEl = document.getElementById('newCatName') as HTMLInputElement;
-                const name = nameEl.value.trim();
-                if (!name) return;
-                
-                if (window.torrentApi) {
-                  const folder = await window.torrentApi.selectFolder();
-                  if (folder) {
-                    const newCats = { ...(settings.categories || {}) };
-                    newCats[name] = folder;
-                    debouncedSave({ categories: newCats });
-                    nameEl.value = '';
-                  }
-                }
-              }}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium"
-            >
-              Add Category...
-            </button>
+        <div className="pt-3 border-t border-slate-200/70">
+          <div className="flex items-center justify-between mb-3">
+            <span className="font-semibold text-slate-700">Scheduled Speed Throttling</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={settings.scheduledThrottleEnabled || false} 
+                onChange={(e) => debouncedSave({ scheduledThrottleEnabled: e.target.checked })}
+                className="sr-only peer" 
+              />
+              <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
           </div>
           
-          <ul className="space-y-2 mt-4">
+          {settings.scheduledThrottleEnabled && (
+            <div className="space-y-3 bg-slate-50/80 p-3 rounded-xl border border-slate-200/60">
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">Start Time</label>
+                  <input type="time" value={settings.scheduledThrottleStart || '09:00'} onChange={(e) => debouncedSave({ scheduledThrottleStart: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg p-1.5" />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">End Time</label>
+                  <input type="time" value={settings.scheduledThrottleEnd || '17:00'} onChange={(e) => debouncedSave({ scheduledThrottleEnd: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg p-1.5" />
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">DL Limit (KB/s)</label>
+                  <input type="number" value={settings.scheduledDownloadLimit ? Math.round(settings.scheduledDownloadLimit/1024) : 0} onChange={(e) => { const v = parseInt(e.target.value)||0; debouncedSave({ scheduledDownloadLimit: v > 0 ? v*1024 : 0 }) }} className="w-full bg-white border border-slate-200 rounded-lg p-1.5 font-mono" />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">UL Limit (KB/s)</label>
+                  <input type="number" value={settings.scheduledUploadLimit ? Math.round(settings.scheduledUploadLimit/1024) : 0} onChange={(e) => { const v = parseInt(e.target.value)||0; debouncedSave({ scheduledUploadLimit: v > 0 ? v*1024 : 0 }) }} className="w-full bg-white border border-slate-200 rounded-lg p-1.5 font-mono" />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Categories */}
+      <div className="glass-card bg-white/80 p-5 rounded-2xl border border-white shadow-2xs space-y-3">
+        <h3 className="text-sm font-bold text-slate-900 border-b border-slate-200/70 pb-2">Custom Categories</h3>
+        <div className="flex gap-2">
+          <input 
+            type="text"
+            id="newCatName"
+            placeholder="Category name (e.g. 4K Cinema, Podcasts)"
+            className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5"
+          />
+          <button 
+            onClick={async () => {
+              const nameEl = document.getElementById('newCatName') as HTMLInputElement;
+              const name = nameEl.value.trim();
+              if (!name) return;
+              if (window.torrentApi) {
+                const folder = await window.torrentApi.selectFolder();
+                if (folder) {
+                  const newCats = { ...(settings.categories || {}) };
+                  newCats[name] = folder;
+                  debouncedSave({ categories: newCats });
+                  nameEl.value = '';
+                }
+              }
+            }}
+            className="glass-btn px-3 py-1.5 rounded-xl font-semibold text-blue-600 hover:text-blue-700"
+          >
+            Add Category...
+          </button>
+        </div>
+        
+        {Object.entries(settings.categories || {}).length > 0 && (
+          <ul className="space-y-1.5 mt-2">
             {Object.entries(settings.categories || {}).map(([catName, catPath]) => (
-              <li key={catName} className="flex justify-between items-center bg-gray-900 p-2 rounded border border-gray-700">
-                <div className="flex flex-col truncate pr-4">
-                  <span className="text-sm font-semibold text-gray-200">{catName}</span>
-                  <span className="text-xs text-gray-500 truncate">{catPath}</span>
+              <li key={catName} className="flex justify-between items-center bg-slate-50 p-2 rounded-xl border border-slate-200/70">
+                <div className="flex flex-col truncate pr-2">
+                  <span className="font-bold text-slate-800">{catName}</span>
+                  <span className="text-[10px] text-slate-400 font-mono truncate">{catPath}</span>
                 </div>
                 <button 
                   onClick={() => {
@@ -205,34 +217,33 @@ export function Settings() {
                     delete newCats[catName];
                     debouncedSave({ categories: newCats });
                   }}
-                  className="text-red-400 hover:text-red-300 p-2 shrink-0"
+                  className="text-red-500 hover:text-red-700 font-semibold px-2 py-1"
                 >
                   Remove
                 </button>
               </li>
             ))}
           </ul>
-        </div>
+        )}
       </div>
 
-      <div className="bg-gray-800 rounded-xl p-6 border border-gray-700/50 shadow-sm">
-        <h3 className="text-xl font-semibold mb-6 text-gray-100 border-b border-gray-700 pb-2">Bandwidth Limiting</h3>
-        
-        <div className="space-y-6">
-
+      {/* Bandwidth Limiting */}
+      <div className="glass-card bg-white/80 p-5 rounded-2xl border border-white shadow-2xs space-y-3">
+        <h3 className="text-sm font-bold text-slate-900 border-b border-slate-200/70 pb-2">Bandwidth & Queue Limits</h3>
+        <div className="grid grid-cols-3 gap-3">
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-2">Max Active Downloads (Queue Limit)</label>
+            <label className="block font-semibold text-slate-600 mb-1">Max Active Swarms</label>
             <input 
               type="number" 
               min="1"
-              max="20"
+              max="30"
               value={settings.maxActiveDownloads || 3}
               onChange={(e) => debouncedSave({ maxActiveDownloads: parseInt(e.target.value) || 3 })}
-              className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-gray-100 focus:outline-none focus:border-blue-500 transition-colors"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 font-mono"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-2">Global Maximum Upload Speed (KB/s)</label>
+            <label className="block font-semibold text-slate-600 mb-1">Upload Cap (KB/s)</label>
             <input 
               type="number" 
               min="0"
@@ -242,14 +253,12 @@ export function Settings() {
                 const val = parseInt(e.target.value) || 0
                 debouncedSave({ uploadLimit: val > 0 ? val * 1024 : 0 })
               }}
-              className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-gray-100 focus:outline-none focus:border-blue-500 transition-colors"
-              placeholder="0 for unlimited"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 font-mono"
+              placeholder="0 (unlimited)"
             />
-            <p className="text-xs text-gray-500 mt-1">Set to 0 for unlimited speed.</p>
           </div>
-
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-2">Global Maximum Download Speed (KB/s)</label>
+            <label className="block font-semibold text-slate-600 mb-1">Download Cap (KB/s)</label>
             <input 
               type="number" 
               min="0"
@@ -259,102 +268,59 @@ export function Settings() {
                 const val = parseInt(e.target.value) || 0
                 debouncedSave({ downloadLimit: val > 0 ? val * 1024 : 0 })
               }}
-              className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-gray-100 focus:outline-none focus:border-blue-500 transition-colors"
-              placeholder="0 for unlimited"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 font-mono"
+              placeholder="0 (unlimited)"
             />
           </div>
         </div>
       </div>
 
-      <div className="bg-gray-800 rounded-xl p-6 border border-gray-700/50 shadow-sm">
-        <h3 className="text-xl font-semibold mb-6 text-gray-100 border-b border-gray-700 pb-2">RSS Auto-Downloader</h3>
-        
-        <div className="space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-400 mb-2">RSS Feeds (URLs)</label>
-            <div className="flex space-x-2 mb-3">
-              <input 
-                type="url"
-                value={feedInput}
-                onChange={(e) => setFeedInput(e.target.value)}
-                placeholder="https://example.com/rss.xml"
-                className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-gray-100 focus:outline-none"
-              />
-              <button 
-                onClick={() => {
-                  if (feedInput.trim()) {
-                    debouncedSave({ rssFeeds: [...(settings.rssFeeds || []), feedInput.trim()] })
-                    setFeedInput('')
-                  }
-                }}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium"
-              >
-                Add
-              </button>
-            </div>
-            <ul className="space-y-2 max-h-32 overflow-y-auto">
-              {(settings.rssFeeds || []).map((feed, idx) => (
-                <li key={idx} className="flex justify-between items-center bg-gray-900 p-2 rounded border border-gray-700">
-                  <span className="text-sm text-gray-300 truncate pr-4">{feed}</span>
-                  <button 
-                    onClick={() => {
-                      const newFeeds = [...settings.rssFeeds]
-                      newFeeds.splice(idx, 1)
-                      debouncedSave({ rssFeeds: newFeeds })
-                    }}
-                    className="text-red-400 hover:text-red-300 p-1"
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-400 mb-2">Auto-Download Rules (Regex / Keywords)</label>
-            <div className="flex space-x-2 mb-3">
-              <input 
-                type="text"
-                value={ruleInput}
-                onChange={(e) => setRuleInput(e.target.value)}
-                placeholder="e.g. 1080p.*Linux"
-                className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-gray-100 focus:outline-none"
-              />
-              <button 
-                onClick={() => {
-                  if (ruleInput.trim()) {
-                    debouncedSave({ rssRules: [...(settings.rssRules || []), ruleInput.trim()] })
-                    setRuleInput('')
-                  }
-                }}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium"
-              >
-                Add
-              </button>
-            </div>
-            <ul className="space-y-2 max-h-32 overflow-y-auto">
-              {(settings.rssRules || []).map((rule, idx) => (
-                <li key={idx} className="flex justify-between items-center bg-gray-900 p-2 rounded border border-gray-700">
-                  <span className="text-sm text-gray-300 font-mono truncate pr-4">{rule}</span>
-                  <button 
-                    onClick={() => {
-                      const newRules = [...settings.rssRules]
-                      newRules.splice(idx, 1)
-                      debouncedSave({ rssRules: newRules })
-                    }}
-                    className="text-red-400 hover:text-red-300 p-1"
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
+      {/* RSS Auto-Downloader */}
+      <div className="glass-card bg-white/80 p-5 rounded-2xl border border-white shadow-2xs space-y-3">
+        <h3 className="text-sm font-bold text-slate-900 border-b border-slate-200/70 pb-2">RSS Auto-Downloader</h3>
+        <div className="flex gap-2">
+          <input 
+            type="url"
+            value={feedInput}
+            onChange={(e) => setFeedInput(e.target.value)}
+            placeholder="https://example.com/rss.xml"
+            className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5"
+          />
+          <button 
+            onClick={() => {
+              if (feedInput.trim()) {
+                debouncedSave({ rssFeeds: [...(settings.rssFeeds || []), feedInput.trim()] })
+                setFeedInput('')
+              }
+            }}
+            className="glass-btn-primary px-3 py-1.5 rounded-xl font-semibold"
+          >
+            Add Feed
+          </button>
         </div>
+
+        {settings.rssFeeds && settings.rssFeeds.length > 0 && (
+          <ul className="space-y-1.5 max-h-28 overflow-y-auto">
+            {settings.rssFeeds.map((feed, idx) => (
+              <li key={idx} className="flex justify-between items-center bg-slate-50 p-2 rounded-xl border border-slate-200/70">
+                <span className="font-mono text-[10px] text-slate-600 truncate pr-2">{feed}</span>
+                <button 
+                  onClick={() => {
+                    const newFeeds = [...settings.rssFeeds]
+                    newFeeds.splice(idx, 1)
+                    debouncedSave({ rssFeeds: newFeeds })
+                  }}
+                  className="text-red-500 hover:text-red-700 font-semibold px-1"
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
       
-      {saving && <p className="text-sm text-gray-400 text-center animate-pulse">Saving changes...</p>}
+      {saving && <p className="text-xs text-blue-600 font-semibold text-center animate-pulse">Saving changes...</p>}
     </div>
   )
 }

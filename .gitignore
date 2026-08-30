@@ -1,11 +1,13 @@
 # Dependencies
-node_modules/
+node_modules
+cpp/build/
 
 # Build output
 dist/
 dist-electron/
 release/
-build/icon.ico
+build/
+*.xcodeproj/
 
 # Test results
 test-results/

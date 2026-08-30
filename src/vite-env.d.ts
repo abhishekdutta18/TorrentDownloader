@@ -16,13 +16,24 @@ interface AppSettings {
 }
 
 interface Window {
-  ipcRenderer: import('electron').IpcRenderer
+  ipcRenderer?: any
   torrentApi: {
-    addTorrent: (torrentId: string, options?: { savePath?: string, category?: string }) => Promise<{ infoHash: string }>
+    addTorrent: (torrentId: string, options?: string | { savePath?: string, category?: string, name?: string }) => Promise<{ infoHash: string }>
+    addTorrentFile?: (file: File, savePath?: string) => Promise<{ infoHash: string }>
+    getPieceInfo?: (hash: string) => Promise<any>
+    getPeerList?: (hash: string) => Promise<any[]>
+    getTrackerList?: (hash: string) => Promise<any[]>
+    reannounceTracker?: (hash: string) => Promise<void>
+    addTracker?: (hash: string, url: string) => Promise<void>
+    getSessionStats?: () => Promise<any>
     getTorrentsStatus: (expandedHash?: string) => Promise<Record<string, unknown>[]>
     removeTorrent: (infoHash: string) => Promise<void>
     pauseTorrent: (infoHash: string) => Promise<void>
     resumeTorrent: (infoHash: string) => Promise<void>
+    stopTorrent?: (infoHash: string) => Promise<void>
+    pauseAllTorrents?: () => Promise<void>
+    resumeAllTorrents?: () => Promise<void>
+    stopAllTorrents?: () => Promise<void>
     getSettings: () => Promise<AppSettings>
     saveSettings: (settings: Partial<AppSettings>) => Promise<AppSettings>
     selectFolder: () => Promise<string | null>
@@ -39,10 +50,11 @@ interface Window {
     stopStream: (infoHash: string) => Promise<void>
     prioritizeFile: (infoHash: string, fileIndex: number) => Promise<void>
     skipFile: (infoHash: string, fileIndex: number) => Promise<void>
-    showConfirmDialog: (title: string, message: string) => Promise<boolean>
+    showConfirmDialog: (title: string, message?: string) => Promise<boolean>
     openTorrentDialog: () => Promise<string | null>
     setSequential: (infoHash: string, sequential: boolean) => Promise<void>
     searchTorrents: (query: string) => Promise<any>
     fetchRss: (url: string) => Promise<any>
+    readClipboard: () => Promise<string>
   }
 }

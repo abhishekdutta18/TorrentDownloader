@@ -1,9 +1,15 @@
- 
 import { useEffect, useState, useRef } from 'react'
-import { Play, Pause, Plus, Download, HardDrive, Settings, Activity, FolderOpen, Copy, Terminal, ArrowDown, ArrowUp, Trash2, Ban, MonitorPlay, Link, Square, UploadCloud, ListOrdered, Search, BarChart2, PlayCircle } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { 
+  Play, Pause, Plus, HardDrive, Settings, Activity, FolderOpen, 
+  Copy, ArrowDown, ArrowUp, Trash2, MonitorPlay, Square, 
+  Search, BarChart2, Check, Loader2, X, ExternalLink, Filter, Film, Layers,
+  TrendingUp, Wifi, Globe, ShieldCheck, Database, Zap
+} from 'lucide-react'
 import './App.css'
 import { Settings as SettingsComponent } from './components/Settings'
 import { VideoPlayer } from './components/VideoPlayer'
+import { sanitizeMagnetInput } from './utils'
 
 interface TorrentFile {
   name: string
@@ -22,6 +28,8 @@ interface Torrent {
   downloadSpeed: number
   uploadSpeed: number
   numPeers: number
+  numSeeds?: number
+  state?: string
   timeRemaining: number
   paused: boolean
   done: boolean
@@ -39,12 +47,12 @@ interface Torrent {
 }
 
 function formatBytes(bytes: number, decimals = 2) {
-  if (!bytes || bytes <= 0 || !isFinite(bytes)) return '0 Bytes'
+  if (!bytes || bytes <= 0 || !isFinite(bytes)) return '0 B'
   const k = 1024
   const dm = decimals < 0 ? 0 : decimals
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB']
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
-  if (i < 0 || i >= sizes.length) return '0 Bytes'
+  if (i < 0 || i >= sizes.length) return '0 B'
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
 }
 
@@ -58,62 +66,87 @@ function formatTime(ms: number) {
   return `${h}h ${m % 60}m`
 }
 
-const PieceMap = ({ pieces }: { pieces?: number[] }) => {
-  if (!pieces || pieces.length === 0) return null;
-  
-  return (
-    <div className="flex w-full h-1.5 bg-gray-900 rounded overflow-hidden mt-1 border border-gray-800" title="Pieces downloaded">
-      {pieces.map((ratio, idx) => (
-        <div 
-          key={idx} 
-          className="h-full flex-1" 
-          style={{ 
-            backgroundColor: ratio === 0 ? 'transparent' : `rgba(59, 130, 246, ${Math.max(0.2, ratio)})` 
-          }} 
-        />
-      ))}
-    </div>
-  )
-}
-
 function App() {
   const [torrents, setTorrents] = useState<Torrent[]>([])
   const [showAddModal, setShowAddModal] = useState(false)
   const [magnetLink, setMagnetLink] = useState('')
   const [customSavePath, setCustomSavePath] = useState('')
   const [error, setError] = useState('')
-  type Tab = 'downloading' | 'completed' | 'search' | 'stats' | 'settings'
+  type Tab = 'downloading' | 'completed' | 'studio' | 'search' | 'stats' | 'settings'
   const [activeTab, setActiveTab] = useState<Tab>('downloading')
-  const [expandedHash, setExpandedHash] = useState<string | null>(null)
-  const [activeStreamUrl, setActiveStreamUrl] = useState<string | null>(null)
+  const [playerModal, setPlayerModal] = useState<{
+    streamUrl: string
+    title: string
+    infoHash?: string
+    fileIndex?: number
+  } | null>(null)
   const [clipboardMagnet, setClipboardMagnet] = useState<string | null>(null)
+  const [isAllStopped, setIsAllStopped] = useState(false)
+  
+  // Side Panel Inspector State
+  const [inspectorHash, setInspectorHash] = useState<string | null>(null)
+  const [inspectorTab, setInspectorTab] = useState<'files' | 'peers' | 'trackers' | 'pieces'>('files')
+  const [menuAnchor, setMenuAnchor] = useState<{
+    hash: string
+    top: number
+    right: number
+    bottom: number
+  } | null>(null)
+
   const clipboardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const expandedHashRef = useRef<string | null>(null)
+  const inspectorHashRef = useRef<string | null>(null)
   
   // Search state
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
+  const [hasSearched, setHasSearched] = useState(false)
+  const [copiedMagnetHash, setCopiedMagnetHash] = useState<string | null>(null)
+  const [searchSort, setSearchSort] = useState<'seeds' | 'size_desc' | 'size_asc' | 'name'>('seeds')
+  const [searchResultFilter, setSearchResultFilter] = useState('')
+  const [addingMagnetHash, setAddingMagnetHash] = useState<string | null>(null)
   const [sortBy, setSortBy] = useState<'name' | 'size' | 'progress' | 'speed' | 'added'>('added')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [filterText, setFilterText] = useState('')
-  const [hasSearched, setHasSearched] = useState(false)
 
-  // Speed history for chart (last 60 seconds)
+  // Speed history for chart (last 60 seconds) & Peak tracking
   const [speedHistory, setSpeedHistory] = useState<{down: number, up: number, time: number}[]>([])
+  const [peakDown, setPeakDown] = useState(0)
+  const [peakUp, setPeakUp] = useState(0)
+
+  // Real Libtorrent Telemetry State
+  const [sessionStats, setSessionStats] = useState<any>(null)
+  const [pieceInfo, setPieceInfo] = useState<{ num_pieces: number; piece_length: number; bitfield: string; availability: number[] } | null>(null)
+
+  // RSS state
+  const [rssItems, setRssItems] = useState<any[]>([])
+  const [isRefreshingRss, setIsRefreshingRss] = useState(false)
+
+  // Piece & peer telemetry states
+  const [pieceData, setPieceData] = useState<any | null>(null)
+  const [peerList, setPeerList] = useState<any[]>([])
+  const [trackerList, setTrackerList] = useState<any[]>([])
+  const [newTrackerUrl, setNewTrackerUrl] = useState('')
+  const [isAddingTracker, setIsAddingTracker] = useState(false)
 
   useEffect(() => {
-    expandedHashRef.current = expandedHash
-  }, [expandedHash])
-  
+    inspectorHashRef.current = inspectorHash
+  }, [inspectorHash])
+
+  useEffect(() => {
+    if (!menuAnchor) return
+    const handleDismiss = () => setMenuAnchor(null)
+    window.addEventListener('resize', handleDismiss)
+    return () => window.removeEventListener('resize', handleDismiss)
+  }, [menuAnchor])
 
   useEffect(() => {
     // Poll for torrents status every second
     const interval = setInterval(async () => {
       try {
         if (window.torrentApi) {
-          const status = await window.torrentApi.getTorrentsStatus(expandedHashRef.current || undefined)
+          const status = await window.torrentApi.getTorrentsStatus(inspectorHashRef.current || undefined)
           setTorrents(status as unknown as Torrent[])
           
           let totalDown = 0
@@ -122,12 +155,37 @@ function App() {
             totalDown += (t.downloadSpeed || 0)
             totalUp += (t.uploadSpeed || 0)
           }
+
+          setPeakDown(prev => Math.max(prev, totalDown))
+          setPeakUp(prev => Math.max(prev, totalUp))
+
           setSpeedHistory(prev => {
             const now = Date.now()
             const updated = [...prev, { down: totalDown, up: totalUp, time: now }]
             if (updated.length > 60) updated.shift()
             return updated
           })
+
+          if (window.torrentApi.getSessionStats) {
+            const stats = await window.torrentApi.getSessionStats()
+            if (stats) setSessionStats(stats)
+          }
+
+          if (inspectorHashRef.current) {
+            const hash = inspectorHashRef.current
+            if (window.torrentApi.getPieceInfo) {
+              const p = await window.torrentApi.getPieceInfo(hash)
+              setPieceInfo(p)
+            }
+            if (window.torrentApi.getPeerList) {
+              const peers = await window.torrentApi.getPeerList(hash)
+              setPeerList(peers)
+            }
+            if (window.torrentApi.getTrackerList) {
+              const trs = await window.torrentApi.getTrackerList(hash)
+              setTrackerList(trs)
+            }
+          }
         }
       } catch (err) {
         console.error("Failed to fetch torrents", err)
@@ -137,12 +195,10 @@ function App() {
     let cleanupClipboard: (() => void) | undefined
     if (window.torrentApi && window.torrentApi.onClipboardMagnet) {
       cleanupClipboard = window.torrentApi.onClipboardMagnet((magnet) => {
-        setClipboardMagnet(magnet)
-        if (clipboardTimerRef.current) clearTimeout(clipboardTimerRef.current)
-        // Auto-dismiss the toast after 10 seconds
-        clipboardTimerRef.current = setTimeout(() => {
-          setClipboardMagnet(null)
-        }, 10000)
+        if (magnet && magnet.startsWith('magnet:?xt=urn:btih:')) {
+          setMagnetLink(magnet)
+          setShowAddModal(true)
+        }
       })
     }
 
@@ -155,14 +211,34 @@ function App() {
       e.preventDefault()
       e.stopPropagation()
       
+      const text = e.dataTransfer?.getData('text/plain') || e.dataTransfer?.getData('text/uri-list')
+      if (text) {
+        const sanitized = sanitizeMagnetInput(text)
+        if (sanitized.startsWith('magnet:?') || sanitized.startsWith('http://') || sanitized.startsWith('https://')) {
+          try {
+            if (window.torrentApi) {
+              await window.torrentApi.addTorrent(sanitized)
+              setActiveTab('downloading')
+            }
+            return
+          } catch (err) {
+            console.error('Failed to add dropped link:', err)
+          }
+        }
+      }
+
       const files = e.dataTransfer?.files
       if (files && files.length > 0) {
         for (let i = 0; i < files.length; i++) {
           const file = files[i] as File & { path?: string }
-          if (file.name.endsWith('.torrent') && file.path) {
+          if (file.name.endsWith('.torrent')) {
             try {
               if (window.torrentApi) {
-                await window.torrentApi.addTorrent(file.path)
+                if (file.path) {
+                  await window.torrentApi.addTorrent(file.path)
+                } else if (window.torrentApi.addTorrentFile) {
+                  await window.torrentApi.addTorrentFile(file)
+                }
               }
             } catch (err) {
               console.error('Failed to add dropped torrent:', err)
@@ -175,55 +251,326 @@ function App() {
     window.addEventListener('dragover', handleDragOver)
     window.addEventListener('drop', handleDrop)
 
+    const currentTimer = clipboardTimerRef.current
     return () => {
       clearInterval(interval)
       if (cleanupClipboard) cleanupClipboard()
-      if (clipboardTimerRef.current) clearTimeout(clipboardTimerRef.current)
+      if (currentTimer) clearTimeout(currentTimer)
       window.removeEventListener('dragover', handleDragOver)
       window.removeEventListener('drop', handleDrop)
     }
   }, [])
 
-  const handleAddTorrent = async (e?: React.FormEvent) => {
-    e?.preventDefault()
-    
-    const target = magnetLink.trim()
-    
-    if (!target) {
-      return
+  // Helper to determine the best playable video file
+  const getBestPlayableFile = async (infoHash: string): Promise<{ index: number, name: string }> => {
+    try {
+      const base = (window.location.port === '5173' || window.location.port === '3000') ? 'http://localhost:8080' : ''
+      const res = await fetch(`${base}/api/torrents/${infoHash}/files`)
+      if (res.ok) {
+        const files: any[] = await res.json()
+        if (files && files.length > 0) {
+          const videoExts = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.m4v', '.mp3', '.flac', '.ts']
+          const videoFile = files.find(f => videoExts.some(ext => (f.name || f.path || '').toLowerCase().endsWith(ext)))
+          if (videoFile) {
+            return { index: videoFile.index ?? 0, name: videoFile.name || 'video.mp4' }
+          }
+          const sorted = [...files].sort((a, b) => (b.size || 0) - (a.size || 0))
+          if (sorted[0]) {
+            return { index: sorted[0].index ?? 0, name: sorted[0].name || 'media' }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to detect best playable file:', e)
+    }
+    return { index: 0, name: 'video.mp4' }
+  }
+
+  // In-process OmniPlayer & In-App Video Streaming Launcher
+  const playInOmniPlayer = async (infoHash: string, fileIndex?: number, title?: string) => {
+    let targetIdx = fileIndex
+    let targetName = ''
+
+    if (targetIdx === undefined) {
+      const best = await getBestPlayableFile(infoHash)
+      targetIdx = best.index
+      targetName = best.name
+    } else {
+      targetName = title || 'video.mp4'
     }
 
-    // Basic validation for magnet links or HTTP(S) torrent URLs
+    // Ensure targetName ends with a recognized media extension
+    if (!/\.[a-z0-9]{2,4}$/i.test(targetName)) {
+      targetName = targetName + '.mp4'
+    }
+
+    const base = (window.location.port === '5173' || window.location.port === '3000') ? 'http://localhost:8080' : ''
+    const safeTitle = encodeURIComponent(targetName)
+    const streamUrl = `${base}/api/stream/${infoHash}/${targetIdx}/${safeTitle}`
+
+    // 1. Launch in-app embedded video streaming overlay immediately!
+    setPlayerModal({
+      streamUrl,
+      title: targetName,
+      infoHash,
+      fileIndex: targetIdx
+    })
+  }
+
+  const openOmniPlayerStudio = () => {
+    if ((window as any).webkit?.messageHandlers?.omniPlayer) {
+      (window as any).webkit.messageHandlers.omniPlayer.postMessage({ action: "openStudio" })
+    } else {
+      setActiveTab('studio')
+    }
+  }
+
+  const handleUniversalStop = async () => {
+    if (isAllStopped) {
+      handleResumeAll()
+      setIsAllStopped(false)
+    } else {
+      handleStopAll()
+      setIsAllStopped(true)
+    }
+  }
+
+  const handleAddTorrent = async (e?: React.FormEvent) => {
+    e?.preventDefault()
+    const target = sanitizeMagnetInput(magnetLink)
+    if (!target) return
+
     if (!target.startsWith('magnet:?') && !target.startsWith('http://') && !target.startsWith('https://')) {
-      setError('Please enter a valid magnet link (starts with magnet:?) or .torrent URL')
+      setError('Please enter a valid magnet link, info hash, or .torrent URL')
       return
     }
 
     try {
       setError('')
       if (window.torrentApi) {
-        const res = await window.torrentApi.addTorrent(target, customSavePath ? { savePath: customSavePath } : undefined)
+        const res = await window.torrentApi.addTorrent(target, customSavePath || undefined)
         if (res && res.infoHash) {
           const existing = torrents.find(t => t.infoHash === res.infoHash)
           if (existing && existing.done) {
             setActiveTab('completed')
-            setExpandedHash(res.infoHash)
+            setInspectorHash(res.infoHash)
           } else {
             setActiveTab('downloading')
-            setExpandedHash(res.infoHash)
+            setInspectorHash(res.infoHash)
           }
         }
       }
       setMagnetLink('')
       setShowAddModal(false)
     } catch (err: unknown) {
-      console.error('Error adding torrent in renderer:', err)
       setError(err instanceof Error ? err.message : String(err))
     }
   }
 
+  const handlePauseAll = () => {
+    if (window.torrentApi) {
+      if (window.torrentApi.pauseAllTorrents) {
+        window.torrentApi.pauseAllTorrents().catch(console.error)
+      } else {
+        displayedTorrents.forEach(t => {
+          if (!t.paused) window.torrentApi.pauseTorrent(t.infoHash).catch(console.error)
+        })
+      }
+    }
+  }
+
+  const handleResumeAll = () => {
+    if (window.torrentApi) {
+      if (window.torrentApi.resumeAllTorrents) {
+        window.torrentApi.resumeAllTorrents().catch(console.error)
+      } else {
+        displayedTorrents.forEach(t => {
+          if (t.paused) window.torrentApi.resumeTorrent(t.infoHash).catch(console.error)
+        })
+      }
+    }
+  }
+
+  const handleStopAll = () => {
+    if (window.torrentApi) {
+      if (window.torrentApi.stopAllTorrents) {
+        window.torrentApi.stopAllTorrents().catch(console.error)
+      } else {
+        displayedTorrents.forEach(t => {
+          if (window.torrentApi.stopTorrent) {
+            window.torrentApi.stopTorrent(t.infoHash).catch(console.error)
+          } else {
+            window.torrentApi.pauseTorrent(t.infoHash).catch(console.error)
+          }
+        })
+      }
+    }
+  }
+
+  const handleStop = (infoHash: string) => {
+    if (window.torrentApi) {
+      if (window.torrentApi.stopTorrent) {
+        window.torrentApi.stopTorrent(infoHash).catch(console.error)
+      } else {
+        window.torrentApi.pauseTorrent(infoHash).catch(console.error)
+      }
+    }
+  }
+
+  const handleRemove = async (infoHash: string, name: string) => {
+    if (window.torrentApi) {
+      const confirmed = await window.torrentApi.showConfirmDialog(
+        'Delete Torrent',
+        `Delete "${name}"? This removes it from the list (downloaded files remain on disk).`
+      )
+      if (!confirmed) return
+      try {
+        await window.torrentApi.removeTorrent(infoHash)
+        if (inspectorHash === infoHash) setInspectorHash(null)
+      } catch (err) {
+        console.error('Failed to remove torrent:', err)
+      }
+    }
+  }
+
+  const handleReannounce = async (hash: string) => {
+    if (window.torrentApi?.reannounceTracker) {
+      await window.torrentApi.reannounceTracker(hash)
+      const trs = await window.torrentApi.getTrackerList?.(hash)
+      if (trs) setTrackerList(trs)
+    }
+  }
+
+  const handleAddTracker = async (e: React.FormEvent, hash: string) => {
+    e.preventDefault()
+    if (!newTrackerUrl.trim() || !window.torrentApi?.addTracker) return
+    try {
+      setIsAddingTracker(true)
+      await window.torrentApi.addTracker(hash, newTrackerUrl.trim())
+      setNewTrackerUrl('')
+      const trs = await window.torrentApi.getTrackerList?.(hash)
+      if (trs) setTrackerList(trs)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setIsAddingTracker(false)
+    }
+  }
+
+  const handleSetPriority = async (hash: string, index: number, priority: number) => {
+    try {
+      if (priority === 0 && window.torrentApi?.skipFile) {
+        await window.torrentApi.skipFile(hash, index)
+      } else if (priority === 7 && window.torrentApi?.prioritizeFile) {
+        await window.torrentApi.prioritizeFile(hash, index)
+      }
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const handleOpenAddModal = async () => {
+    setError('')
+    setShowAddModal(true)
+    let initial = ''
+    try {
+      let clip = ''
+      if (window.torrentApi?.readClipboard) {
+        clip = await window.torrentApi.readClipboard()
+      } else if (navigator.clipboard) {
+        clip = await navigator.clipboard.readText()
+      }
+      if (clip) {
+        const sanitized = sanitizeMagnetInput(clip)
+        if (sanitized.startsWith('magnet:?') || sanitized.startsWith('http://') || sanitized.startsWith('https://')) {
+          initial = sanitized
+        }
+      }
+    } catch {
+      // Ignore clipboard read errors
+    }
+    setMagnetLink(initial)
+  }
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const query = searchQuery.trim()
+    if (!query) return
+    setIsSearching(true)
+    setSearchError('')
+    setSearchResults([])
+    setHasSearched(true)
+    try {
+      if (window.torrentApi) {
+        const results = await window.torrentApi.searchTorrents(query)
+        if (Array.isArray(results)) {
+          setSearchResults(results)
+        } else if (results && (results as any).error) {
+          throw new Error((results as any).error)
+        } else {
+          setSearchResults([])
+        }
+      }
+    } catch (err: any) {
+      setSearchError(err.message || 'Search failed')
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  const handleCopyMagnet = async (magnet: string, key: string) => {
+    if (!magnet) return
+    try {
+      if (window.torrentApi?.copyToClipboard) {
+        await window.torrentApi.copyToClipboard(magnet)
+      } else if (navigator.clipboard) {
+        await navigator.clipboard.writeText(magnet)
+      }
+      setCopiedMagnetHash(key)
+      setTimeout(() => {
+        setCopiedMagnetHash(prev => (prev === key ? null : prev))
+      }, 2000)
+    } catch (e) {
+      console.warn('Failed to copy magnet link:', e)
+    }
+  }
+
+  const handleDownloadFromSearch = async (res: any, key: string) => {
+    if (!window.torrentApi || !res.magnet) return
+    setAddingMagnetHash(key)
+    try {
+      const result = await window.torrentApi.addTorrent(res.magnet, { name: res.name })
+      if (result && result.infoHash) {
+        setInspectorHash(result.infoHash)
+      }
+      setActiveTab('downloading')
+    } catch (e: any) {
+      setSearchError(e.message || 'Failed to add torrent')
+    } finally {
+      setAddingMagnetHash(null)
+    }
+  }
+
+  const getExistingTorrent = (res: any) => {
+    if (!res) return null
+    const hash = (res.infoHash || '').toLowerCase()
+    if (!hash) return null
+    return torrents.find(t => (t.infoHash || '').toLowerCase() === hash) || null
+  }
+
   const downloadingCount = torrents.filter(t => !t.done).length
   const completedCount = torrents.filter(t => t.done).length
+  const activeDownloadingSwarms = torrents.filter(t => !t.done && !t.paused && t.downloadSpeed > 0).length
+  const activeSeedingSwarms = torrents.filter(t => t.done && !t.paused && t.uploadSpeed > 0).length
+  const pausedSwarms = torrents.filter(t => t.paused).length
+
+  // Aggregated Statistics Metrics
+  const totalDownloaded = torrents.reduce((acc, t) => acc + (t.downloaded || 0), 0)
+  const totalUploaded = torrents.reduce((acc, t) => acc + (t.uploaded || 0), 0)
+  const totalWanted = torrents.reduce((acc, t) => acc + (t.length || 0), 0)
+  const globalRatio = totalDownloaded > 0 ? (totalUploaded / totalDownloaded) : 0
+  const totalPeers = torrents.reduce((acc, t) => acc + (t.numPeers || 0), 0)
+  const totalSeeds = torrents.reduce((acc, t) => acc + (t.numSeeds || 0), 0)
 
   const displayedTorrents = torrents.filter(t => {
     if (activeTab === 'downloading') return !t.done
@@ -238,7 +585,6 @@ function App() {
     else if (sortBy === 'size') cmp = a.length - b.length;
     else if (sortBy === 'progress') cmp = a.progress - b.progress;
     else if (sortBy === 'speed') cmp = (a.downloadSpeed + a.uploadSpeed) - (b.downloadSpeed + b.uploadSpeed);
-    // 'added' can just use the original order or 'created' field if available
     else if (sortBy === 'added') {
         const dateA = a.created ? new Date(a.created).getTime() : 0;
         const dateB = b.created ? new Date(b.created).getTime() : 0;
@@ -247,702 +593,1091 @@ function App() {
     return sortOrder === 'asc' ? cmp : -cmp;
   })
 
-  const handlePauseAll = () => {
-    if (window.torrentApi) {
-      displayedTorrents.forEach(t => {
-        if (!t.paused) window.torrentApi.pauseTorrent(t.infoHash).catch(console.error)
-      })
-    }
-  }
+  const currentInspectorTorrent = torrents.find(t => t.infoHash === inspectorHash) || null
 
-  const handleResumeAll = () => {
-    if (window.torrentApi) {
-      displayedTorrents.forEach(t => {
-        if (t.paused) window.torrentApi.resumeTorrent(t.infoHash).catch(console.error)
-      })
-    }
-  }
+  const filteredAndSortedSearchResults = searchResults
+    .filter((item: any) => {
+      if (!searchResultFilter.trim()) return true
+      const term = searchResultFilter.toLowerCase()
+      return (item.name || '').toLowerCase().includes(term) || (item.source || '').toLowerCase().includes(term)
+    })
+    .sort((a: any, b: any) => {
+      if (searchSort === 'seeds') return (b.seeders || 0) - (a.seeders || 0)
+      if (searchSort === 'size_desc') return (b.size || 0) - (a.size || 0)
+      if (searchSort === 'size_asc') return (a.size || 0) - (b.size || 0)
+      if (searchSort === 'name') return (a.name || '').localeCompare(b.name || '')
+      return 0
+    })
 
-  const handleRemove = async (infoHash: string, name: string) => {
-    if (window.torrentApi) {
-      const confirmed = await window.torrentApi.showConfirmDialog(
-        'Delete Torrent',
-        `Delete "${name}"? This will delete the torrent from the app (downloaded files will remain on your disk).`
-      )
-      if (!confirmed) return
-      try {
-        await window.torrentApi.removeTorrent(infoHash)
-      } catch (err) {
-        console.error('Failed to remove torrent:', err)
-      }
-    }
-  }
-
-  const handleOpenAddModal = () => {
-    setError('')
-    setMagnetLink('')
-    setShowAddModal(true)
-  }
-
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!searchQuery.trim()) return
-    setIsSearching(true)
-    setSearchError('')
-    setSearchResults([])
-    try {
-      if (window.torrentApi) {
-        const results = await window.torrentApi.searchTorrents(searchQuery.trim())
-        if (results.error) throw new Error(results.error)
-        setSearchResults(results)
-        setHasSearched(true)
-      }
-    } catch (err: any) {
-      setSearchError(err.message || 'Search failed')
-    } finally {
-      setIsSearching(false)
-    }
-  }
+  const latestDownSpeed = speedHistory.length > 0 ? speedHistory[speedHistory.length - 1].down : 0
+  const latestUpSpeed = speedHistory.length > 0 ? speedHistory[speedHistory.length - 1].up : 0
 
   return (
-    <div className="flex h-screen bg-gray-900 text-gray-100 font-sans overflow-hidden">
-      {/* Sidebar */}
-      <div className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
-        <div className="pt-10 pb-4 px-4 border-b border-gray-700 flex items-center space-x-2 [-webkit-app-region:drag]">
-          <Activity className="text-blue-500" size={24} />
-          <h1 className="text-xl font-bold tracking-tight">Torrent Downloader</h1>
-        </div>
-        
-        <nav className="flex-1 p-4 space-y-2">
-          <button 
-            onClick={() => { setActiveTab('downloading'); setExpandedHash(null); }}
-            className={`flex items-center justify-between w-full p-2 rounded-lg transition-colors ${activeTab === 'downloading' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-gray-700/50 text-gray-400'}`}
-          >
-            <div className="flex items-center space-x-3">
-              <Download size={20} />
-              <span className="font-medium">Downloading</span>
-            </div>
-            {downloadingCount > 0 && (
-              <span className="text-xs bg-blue-500/20 text-blue-300 font-semibold px-2 py-0.5 rounded-full">{downloadingCount}</span>
-            )}
-          </button>
-          <button 
-            onClick={() => { setActiveTab('completed'); setExpandedHash(null); }}
-            className={`flex items-center justify-between w-full p-2 rounded-lg transition-colors ${activeTab === 'completed' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-gray-700/50 text-gray-400'}`}
-          >
-            <div className="flex items-center space-x-3">
-              <HardDrive size={20} />
-              <span className="font-medium">Completed</span>
-            </div>
-            {completedCount > 0 && (
-              <span className="text-xs bg-green-500/20 text-green-300 font-semibold px-2 py-0.5 rounded-full">{completedCount}</span>
-            )}
-          </button>
-          <button 
-            onClick={() => { setActiveTab('search'); setExpandedHash(null); }}
-            className={`flex items-center space-x-3 w-full p-2 rounded-lg transition-colors ${activeTab === 'search' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-gray-700/50 text-gray-400'}`}
-          >
-            <Search size={20} />
-            <span className="font-medium">Search</span>
-          </button>
-          <button 
-            onClick={() => { setActiveTab('stats'); setExpandedHash(null); }}
-            className={`flex items-center space-x-3 w-full p-2 rounded-lg transition-colors ${activeTab === 'stats' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-gray-700/50 text-gray-400'}`}
-          >
-            <BarChart2 size={20} />
-            <span className="font-medium">Statistics</span>
-          </button>
-          <button 
-            onClick={() => { setActiveTab('settings'); setExpandedHash(null); }}
-            className={`flex items-center space-x-3 w-full p-2 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-gray-700/50 text-gray-400'}`}
-          >
-            <Settings size={20} />
-            <span className="font-medium">Settings</span>
-          </button>
-          {import.meta && (import.meta as any).env && (import.meta as any).env.DEV && (
-            <button 
-              onClick={() => window.torrentApi?.toggleDevTools?.()}
-              className="flex items-center space-x-3 w-full p-2 rounded-lg transition-colors hover:bg-gray-700/50 text-gray-400"
-            >
-              <Terminal size={20} />
-              <span className="font-medium">DevTools</span>
-            </button>
-          )}
-        </nav>
+    <div className="w-screen h-screen flex flex-col glass-window overflow-hidden select-none relative bg-gradient-to-br from-slate-100/90 via-sky-50/40 to-slate-100/90 text-slate-900 font-sans">
+      
+      {/* Ambient Daylight Optical Orbs behind glass */}
+      <div className="fixed top-[-10%] right-[-5%] w-[450px] h-[450px] bg-sky-200/30 rounded-full blur-[140px] pointer-events-none"></div>
+      <div className="fixed bottom-[-10%] left-[-5%] w-[500px] h-[500px] bg-blue-100/35 rounded-full blur-[150px] pointer-events-none"></div>
 
-        <div className="p-4">
+      {/* Apple Light Frosted Titlebar - Edge-to-Edge Native Mac Integration */}
+      <header className="h-13 w-full border-b border-slate-200/60 px-4 flex items-center justify-between bg-white/40 backdrop-blur-xl relative z-20 [-webkit-app-region:drag]">
+        
+        {/* Left Section: Offset for macOS Native Traffic Lights + Brand */}
+        <div className="flex items-center gap-2.5 ml-20 [-webkit-app-region:no-drag]">
+          <div className="w-5 h-5 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-xs">
+            <Play className="w-2.5 h-2.5 text-white fill-white ml-0.5" />
+          </div>
+          <span className="text-xs font-extrabold tracking-tight text-slate-800">
+            OmniFlux
+          </span>
+        </div>
+
+        {/* Minimal Center Search Pill */}
+        <div className="relative w-80 [-webkit-app-region:no-drag]">
+          <input 
+            type="text" 
+            placeholder="Search or filter transfers..." 
+            value={filterText}
+            onChange={e => setFilterText(e.target.value)}
+            className="w-full bg-white/70 hover:bg-white/95 focus:bg-white border border-white/90 rounded-full text-xs py-1.5 pl-8 pr-3 text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-400 shadow-2xs transition" 
+          />
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+        </div>
+
+        {/* Right Header Controls: Speeds + Universal Stop + Add */}
+        <div className="flex items-center gap-2.5 [-webkit-app-region:no-drag]">
+          {/* Speed Counters */}
+          <div className="flex items-center gap-2 font-mono text-[11px] text-slate-600 bg-white/70 border border-white/90 px-3 py-1 rounded-full shadow-2xs">
+            <span className="text-emerald-600 font-semibold flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>{formatBytes(latestDownSpeed)}/s</span>
+            </span>
+            <span className="text-slate-300">|</span>
+            <span className="text-blue-600 font-medium">
+              {formatBytes(latestUpSpeed)}/s
+            </span>
+          </div>
+
+          {/* Universal Stop All Button */}
+          <button 
+            onClick={handleUniversalStop}
+            className={`glass-btn text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 transition active:scale-[0.98] shadow-2xs ${
+              isAllStopped 
+                ? 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 border-emerald-200/80' 
+                : 'text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200/80'
+            }`}
+            title={isAllStopped ? "Resume All Transfers" : "Universal Stop: Immediately halts all active torrent downloads and uploads"}
+          >
+            {isAllStopped ? (
+              <>
+                <Play size={10} className="fill-current text-emerald-600" /> Resume All
+              </>
+            ) : (
+              <>
+                <Square size={9} className="fill-current text-red-600" /> Stop All
+              </>
+            )}
+          </button>
+
+          {/* Add Torrent Button */}
           <button 
             onClick={handleOpenAddModal}
-            className="w-full flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-xl shadow-lg shadow-blue-500/20 transition-all active:scale-95"
+            className="glass-btn-primary text-xs font-semibold px-3.5 py-1.5 rounded-full flex items-center gap-1 transition active:scale-[0.98]"
           >
-            <Plus size={20} />
-            <span className="font-semibold">Add Torrent</span>
+            <Plus size={14} />
+            <span>Add</span>
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 border-b border-gray-800 bg-gray-900/50 backdrop-blur-sm flex items-center justify-between px-6 [-webkit-app-region:drag]">
-          <h2 className="text-lg font-semibold text-gray-200 capitalize">{activeTab}</h2>
-          <div className="flex items-center space-x-4">
-            {displayedTorrents.length > 0 && activeTab === 'downloading' && (
-              <div className="flex space-x-2 mr-4 border-r border-gray-700 pr-4 [-webkit-app-region:no-drag]">
-                <button 
-                  onClick={handlePauseAll}
-                  className="px-3 py-1.5 text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg flex items-center transition-colors"
-                >
-                  <Pause size={14} className="mr-1.5" /> Pause All
-                </button>
-                <button 
-                  onClick={handleResumeAll}
-                  className="px-3 py-1.5 text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg flex items-center transition-colors"
-                >
-                  <Play size={14} className="mr-1.5" /> Resume All
-                </button>
+      {/* Main App Workspace */}
+      <div className="flex flex-1 overflow-hidden min-h-0 relative z-10">
+        
+        {/* Full-Height Minimal Frosted Sidebar */}
+        <div className="w-52 glass-sidebar p-3.5 flex flex-col justify-between select-none border-r border-slate-200/60">
+          <nav className="space-y-1 text-xs">
+            <button 
+              onClick={() => { setActiveTab('downloading'); }}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl font-bold transition-all ${
+                activeTab === 'downloading' 
+                  ? 'text-blue-700 bg-white/95 border border-white shadow-2xs' 
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-blue-600">⚡</span>
+                <span>Transfers</span>
               </div>
-            )}
-            <div className="text-sm text-gray-400">
-              {displayedTorrents.length} active transfer(s)
-            </div>
+              {downloadingCount > 0 && (
+                <span className="font-mono text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-bold">
+                  {downloadingCount}
+                </span>
+              )}
+            </button>
+
+            <button 
+              onClick={() => { setActiveTab('completed'); }}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl font-medium transition-all ${
+                activeTab === 'completed' 
+                  ? 'text-blue-700 bg-white/95 border border-white shadow-2xs font-bold' 
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-emerald-600">✓</span>
+                <span>Completed</span>
+              </div>
+              {completedCount > 0 && (
+                <span className="font-mono text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-full">
+                  {completedCount}
+                </span>
+              )}
+            </button>
+
+            <button 
+              onClick={openOmniPlayerStudio}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-indigo-700 hover:bg-white/50 transition-all font-bold group"
+            >
+              <div className="flex items-center gap-2">
+                <span>🎬</span>
+                <span>OmniPlayer</span>
+              </div>
+              <span className="text-[10px] text-indigo-400 group-hover:translate-x-0.5 transition-transform">▶</span>
+            </button>
+
+            <button 
+              onClick={() => { setActiveTab('search'); }}
+              className={`w-full flex items-center space-x-2 px-3 py-2 rounded-xl font-medium transition-all ${
+                activeTab === 'search' 
+                  ? 'text-blue-700 bg-white/95 border border-white shadow-2xs font-bold' 
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+              }`}
+            >
+              <Search size={14} className="text-slate-400" />
+              <span>Search</span>
+            </button>
+
+            <button 
+              onClick={() => { setActiveTab('stats'); }}
+              className={`w-full flex items-center space-x-2 px-3 py-2 rounded-xl font-medium transition-all ${
+                activeTab === 'stats' 
+                  ? 'text-blue-700 bg-white/95 border border-white shadow-2xs font-bold' 
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+              }`}
+            >
+              <BarChart2 size={14} className="text-slate-400" />
+              <span>Statistics</span>
+            </button>
+
+            <button 
+              onClick={() => { setActiveTab('settings'); }}
+              className={`w-full flex items-center space-x-2 px-3 py-2 rounded-xl font-medium transition-all ${
+                activeTab === 'settings' 
+                  ? 'text-blue-700 bg-white/95 border border-white shadow-2xs font-bold' 
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+              }`}
+            >
+              <Settings size={14} className="text-slate-400" />
+              <span>Settings</span>
+            </button>
+          </nav>
+
+          {/* Sidebar Status Footer */}
+          <div className="px-2 text-[11px] text-slate-400 flex justify-between font-mono border-t border-slate-200/60 pt-3">
+            <span>Daemon</span>
+            <span className="text-emerald-700 font-semibold flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 127.0.0.1:8080
+            </span>
           </div>
-        </header>
-        { (activeTab === 'downloading' || activeTab === 'completed') && (
-        <div className="px-6 pt-4 flex space-x-4 items-center">
-            <input 
-              type="text" 
-              placeholder="Filter torrents..." 
-              value={filterText}
-              onChange={e => setFilterText(e.target.value)}
-              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500 w-64"
-            />
-            <div className="flex items-center space-x-2 text-sm">
-                <span className="text-gray-400">Sort:</span>
-                <select 
-                  value={sortBy} 
-                  onChange={e => setSortBy(e.target.value as any)}
-                  className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-gray-200 focus:outline-none focus:border-blue-500"
-                >
-                    <option value="added">Date Added</option>
-                    <option value="name">Name</option>
-                    <option value="size">Size</option>
-                    <option value="progress">Progress</option>
-                    <option value="speed">Speed</option>
-                </select>
-                <button 
-                  onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-                  className="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg border border-gray-700"
-                >
-                    {sortOrder === 'asc' ? '↑' : '↓'}
-                </button>
-            </div>
         </div>
-        )}
-        <main className="flex-1 overflow-auto p-6 space-y-4">
+
+        {/* Main Content Area */}
+        <div 
+          onScroll={() => { if (menuAnchor) setMenuAnchor(null) }}
+          className="flex-1 flex flex-col overflow-hidden bg-white/20 p-5 space-y-3 custom-scroll overflow-y-auto min-w-0"
+        >
+          
           {activeTab === 'search' ? (
-            <div className="max-w-4xl mx-auto h-full flex flex-col">
-              <form onSubmit={handleSearch} className="flex gap-2 mb-6">
-                <input 
-                  type="text" 
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Search for torrents..."
-                  className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-5 py-3 text-gray-100 focus:outline-none focus:border-blue-500 shadow-sm"
-                />
+            <div className="max-w-4xl mx-auto w-full h-full flex flex-col">
+              <form onSubmit={handleSearch} className="flex gap-2 mb-4">
+                <div className="relative flex-1">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input 
+                    type="text" 
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    placeholder="Search for movies, software, music across indexers..."
+                    className="w-full bg-white/70 border border-slate-200/80 rounded-full pl-10 pr-10 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-400 shadow-2xs"
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => { setSearchQuery(''); setSearchResults([]); setHasSearched(false); }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
                 <button 
                   type="submit"
                   disabled={isSearching || !searchQuery.trim()}
-                  className="px-6 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium rounded-xl transition-colors shadow-sm"
+                  className="px-5 py-2.5 glass-btn-primary disabled:opacity-50 text-white font-medium rounded-full transition-colors text-xs flex items-center gap-2 cursor-pointer"
                 >
-                  {isSearching ? 'Searching...' : 'Search'}
+                  {isSearching ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+                  <span>Search</span>
                 </button>
               </form>
-              
-              {searchError && <div className="text-red-400 p-4 bg-red-400/10 rounded-lg">{searchError}</div>}
-              
-              <div className="flex-1 overflow-auto space-y-3 custom-scrollbar pr-2">
-                {searchResults.map((res: any, idx) => (
-                  <div key={idx} className="bg-gray-800 p-4 rounded-xl border border-gray-700/50 flex flex-col gap-2 hover:border-gray-600 transition-colors">
-                    <h3 className="font-semibold text-gray-200 break-words">{res.name}</h3>
-                    <div className="flex justify-between items-center text-sm">
-                      <div className="flex gap-4 text-gray-400">
-                        <span className="text-green-400">↑ {res.seeders}</span>
-                        <span className="text-red-400">↓ {res.leechers}</span>
-                        <span>{formatBytes(res.size)}</span>
+
+              {searchError && (
+                <div className="text-red-600 p-3 bg-red-50 border border-red-200 rounded-xl mb-4 text-xs flex items-center justify-between">
+                  <span>{searchError}</span>
+                  <button onClick={() => setSearchError('')}><X size={14} /></button>
+                </div>
+              )}
+
+              <div className="flex-1 overflow-auto space-y-2.5 custom-scroll">
+                {filteredAndSortedSearchResults.map((res: any, idx) => {
+                  const key = res.infoHash || `${res.name}-${idx}`
+                  const existingTorrent = getExistingTorrent(res)
+                  const isCopied = copiedMagnetHash === key
+                  const isAdding = addingMagnetHash === key
+
+                  return (
+                    <div key={key} className="glass-row p-3.5 rounded-2xl flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <h4 className="text-xs font-bold text-slate-900 truncate">{res.name}</h4>
+                        <div className="text-[11px] text-slate-500 font-mono flex items-center gap-2 mt-0.5">
+                          <span>{formatBytes(res.size)}</span>
+                          <span>•</span>
+                          <span className="text-emerald-600 font-semibold">Seeds: {res.seeders || 0}</span>
+                          <span>•</span>
+                          <span>Peers: {res.leechers || 0}</span>
+                          {res.source && (
+                            <span className="bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded text-[10px]">
+                              {res.source}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex space-x-2">
-                        <button 
-                          onClick={async () => {
-                            if (window.torrentApi) {
-                              try {
-                                await window.torrentApi.copyToClipboard(res.magnet)
-                              } catch (e: any) {
-                                console.error(e)
-                              }
-                            }
-                          }}
-                          className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg transition-colors text-xs font-medium"
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleCopyMagnet(res.magnet, key)}
+                          className="glass-btn px-2.5 py-1 rounded-lg text-xs text-slate-600 font-medium"
                         >
-                          Copy Link
+                          {isCopied ? 'Copied' : 'Copy'}
                         </button>
-                        <button 
-                          onClick={async () => {
-                            if (window.torrentApi) {
-                              try {
-                                await window.torrentApi.addTorrent(res.magnet)
-                                setActiveTab('downloading')
-                              } catch (e: any) {
-                                setSearchError(e.message)
-                              }
-                            }
-                          }}
-                          className="px-3 py-1.5 bg-gray-700 hover:bg-blue-600 text-gray-200 hover:text-white rounded-lg transition-colors text-xs font-medium"
-                        >
-                          Download
-                        </button>
+
+                        {existingTorrent ? (
+                          <button
+                            onClick={() => {
+                              setInspectorHash(existingTorrent.infoHash)
+                              setActiveTab('downloading')
+                            }}
+                            className="glass-btn px-3 py-1 rounded-lg text-xs text-blue-600 font-bold"
+                          >
+                            View
+                          </button>
+                        ) : (
+                          <button
+                            disabled={isAdding}
+                            onClick={() => handleDownloadFromSearch(res, key)}
+                            className="glass-btn-primary px-3 py-1 rounded-lg text-xs font-bold"
+                          >
+                            {isAdding ? 'Adding...' : 'Download'}
+                          </button>
+                        )}
                       </div>
                     </div>
-                  </div>
-                ))}
-                {!isSearching && searchResults.length === 0 && hasSearched && !searchError && (
-                  <div className="text-center text-gray-500 mt-10">No results found for "{searchQuery}"</div>
-                )}
+                  )
+                })}
               </div>
             </div>
           ) : activeTab === 'stats' ? (
-            <div className="max-w-4xl mx-auto h-full flex flex-col space-y-6">
-              <h2 className="text-2xl font-bold text-gray-100">Global Bandwidth Statistics</h2>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-gray-800 p-6 rounded-xl border border-gray-700/50 shadow-sm flex flex-col items-center">
-                  <span className="text-gray-400 mb-2">Current Download</span>
-                  <span className="text-3xl font-bold text-green-400">
-                    {formatBytes(speedHistory.length > 0 ? speedHistory[speedHistory.length - 1].down : 0)}/s
-                  </span>
+            /* Complete Apple Frosted Glass Statistics Dashboard */
+            <div className="max-w-4xl mx-auto w-full flex flex-col space-y-4 pr-1 pb-4">
+              
+              {/* Top Banner */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <BarChart2 size={16} className="text-blue-600" />
+                    <span>Network & Swarm Telemetry</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Real-time aggregate bandwidth & BitTorrent swarm health</p>
                 </div>
-                <div className="bg-gray-800 p-6 rounded-xl border border-gray-700/50 shadow-sm flex flex-col items-center">
-                  <span className="text-gray-400 mb-2">Current Upload</span>
-                  <span className="text-3xl font-bold text-red-400">
-                    {formatBytes(speedHistory.length > 0 ? speedHistory[speedHistory.length - 1].up : 0)}/s
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Live Engine Stream
                   </span>
                 </div>
               </div>
 
-              <div className="bg-gray-800 p-6 rounded-xl border border-gray-700/50 shadow-sm flex-1 flex flex-col">
-                <h3 className="text-lg font-medium text-gray-200 mb-4">Bandwidth History (Last 60s)</h3>
-                <div className="flex-1 relative w-full h-full min-h-[300px]">
-                  <svg className="w-full h-full overflow-visible" preserveAspectRatio="none">
-                    <defs>
-                      <linearGradient id="downGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#4ade80" stopOpacity="0.2"/>
-                        <stop offset="100%" stopColor="#4ade80" stopOpacity="0"/>
-                      </linearGradient>
-                      <linearGradient id="upGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#f87171" stopOpacity="0.2"/>
-                        <stop offset="100%" stopColor="#f87171" stopOpacity="0"/>
-                      </linearGradient>
-                    </defs>
-                    
-                    {(() => {
-                      if (speedHistory.length < 2) return null;
-                      
-                      let maxSpeed = 1024 * 1024; // 1MB/s minimum scale
-                      speedHistory.forEach(s => {
-                        if (s.down > maxSpeed) maxSpeed = s.down;
-                        if (s.up > maxSpeed) maxSpeed = s.up;
-                      });
-                      // add 10% headroom
-                      maxSpeed *= 1.1;
+              {/* 6-Card Key Metrics Grid */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="glass-card p-3.5 rounded-2xl border border-white bg-white/70 shadow-2xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-xs text-slate-500 font-semibold">
+                    <span>Download Throughput</span>
+                    <ArrowDown size={14} className="text-emerald-500" />
+                  </div>
+                  <div className="text-xl font-mono font-bold text-emerald-600 mt-2">
+                    {formatBytes(latestDownSpeed)}/s
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono mt-1">
+                    Peak: {formatBytes(peakDown)}/s
+                  </div>
+                </div>
 
-                      const width = 100;
-                      const height = 100;
+                <div className="glass-card p-3.5 rounded-2xl border border-white bg-white/70 shadow-2xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-xs text-slate-500 font-semibold">
+                    <span>Upload Throughput</span>
+                    <ArrowUp size={14} className="text-blue-500" />
+                  </div>
+                  <div className="text-xl font-mono font-bold text-blue-600 mt-2">
+                    {formatBytes(latestUpSpeed)}/s
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono mt-1">
+                    Peak: {formatBytes(peakUp)}/s
+                  </div>
+                </div>
 
-                      const getPoints = (type: 'down' | 'up') => {
-                        return speedHistory.map((s, i) => {
-                          const x = (i / (Math.max(60, speedHistory.length) - 1)) * width;
-                          const y = height - (s[type] / maxSpeed) * height;
-                          return `${x}%,${y}%`;
-                        }).join(' ');
-                      };
+                <div className="glass-card p-3.5 rounded-2xl border border-white bg-white/70 shadow-2xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-xs text-slate-500 font-semibold">
+                    <span>Global Share Ratio</span>
+                    <TrendingUp size={14} className="text-indigo-500" />
+                  </div>
+                  <div className="text-xl font-mono font-bold text-indigo-600 mt-2">
+                    {globalRatio.toFixed(2)}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono mt-1">
+                    {globalRatio >= 1.0 ? '✓ Healthy Seeder' : 'Ratio Builder'}
+                  </div>
+                </div>
 
-                      const downPoints = getPoints('down');
-                      const upPoints = getPoints('up');
+                <div className="glass-card p-3.5 rounded-2xl border border-white bg-white/70 shadow-2xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-xs text-slate-500 font-semibold">
+                    <span>Total Downloaded</span>
+                    <Database size={14} className="text-slate-400" />
+                  </div>
+                  <div className="text-lg font-mono font-bold text-slate-800 mt-2">
+                    {formatBytes(totalDownloaded)}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono mt-1">
+                    Wanted: {formatBytes(totalWanted)}
+                  </div>
+                </div>
 
-                      const lastX = speedHistory.length > 0 ? ((speedHistory.length - 1) / (Math.max(60, speedHistory.length) - 1)) * width : 0;
-                      return (
-                        <>
-                          <polygon points={`0%,100% ${downPoints} ${lastX}%,100%`} fill="url(#downGrad)" />
-                          <polygon points={`0%,100% ${upPoints} ${lastX}%,100%`} fill="url(#upGrad)" />
-                          
-                          <polyline points={downPoints} fill="none" stroke="#4ade80" strokeWidth="2" vectorEffect="non-scaling-stroke" />
-                          <polyline points={upPoints} fill="none" stroke="#f87171" strokeWidth="2" vectorEffect="non-scaling-stroke" />
-                        </>
-                      );
-                    })()}
-                  </svg>
-                  <div className="absolute top-0 right-0 text-xs text-gray-500 bg-gray-900/80 px-2 py-1 rounded">
-                    Y-Axis scales dynamically
+                <div className="glass-card p-3.5 rounded-2xl border border-white bg-white/70 shadow-2xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-xs text-slate-500 font-semibold">
+                    <span>Total Uploaded</span>
+                    <Zap size={14} className="text-slate-400" />
+                  </div>
+                  <div className="text-lg font-mono font-bold text-slate-800 mt-2">
+                    {formatBytes(totalUploaded)}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono mt-1">
+                    All-time transferred
+                  </div>
+                </div>
+
+                <div className="glass-card p-3.5 rounded-2xl border border-white bg-white/70 shadow-2xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-xs text-slate-500 font-semibold">
+                    <span>Active Swarms</span>
+                    <Globe size={14} className="text-slate-400" />
+                  </div>
+                  <div className="text-lg font-mono font-bold text-slate-800 mt-2">
+                    {activeDownloadingSwarms + activeSeedingSwarms} <span className="text-xs text-slate-400 font-normal">/ {torrents.length}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono mt-1">
+                    {activeDownloadingSwarms} DL • {activeSeedingSwarms} UL • {pausedSwarms} Idle
                   </div>
                 </div>
               </div>
-            </div>
-          ) : activeTab === 'settings' ? (
-            <SettingsComponent />
-          ) : displayedTorrents.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-4">
-              <Download size={48} className="opacity-20" />
-              <p className="text-lg">No torrents found</p>
-            </div>
-          ) : (
-            displayedTorrents.map((t) => (
-              <div 
-                key={t.infoHash} 
-                className={`bg-gray-800 rounded-xl p-5 border shadow-sm transition-colors group cursor-pointer ${expandedHash === t.infoHash ? 'border-gray-500 bg-gray-750' : 'border-gray-700/50 hover:border-gray-600'}`}
-                onClick={() => setExpandedHash(expandedHash === t.infoHash ? null : t.infoHash)}
-              >
-                <div className="flex justify-between items-start mb-3">
-                  <h3 className="font-semibold text-gray-100 truncate pr-4">{t.name || 'Fetching metadata...'}</h3>
-                  <div className="flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                    {t.paused ? (
-                      <button 
-                        className={`p-2 rounded-lg text-white flex items-center transition-colors ${t.done ? 'bg-blue-600 hover:bg-blue-500' : 'bg-green-600 hover:bg-green-500'}`}
-                        title={t.done ? "Start Seeding" : "Resume Download"}
-                        onClick={() => window.torrentApi.resumeTorrent(t.infoHash)}
-                      >
-                        {t.done ? <UploadCloud size={14} /> : <Play size={14} className="fill-current" />}
-                        <span className="ml-2 text-xs font-medium uppercase tracking-wider">{t.done ? 'Seed' : 'Resume'}</span>
-                      </button>
-                    ) : (
-                      <button 
-                        className={`p-2 rounded-lg text-white flex items-center transition-colors ${t.done ? 'bg-red-600 hover:bg-red-500' : 'bg-yellow-600 hover:bg-yellow-500'}`}
-                        title={t.done ? "Stop Seeding (Sever Connections)" : "Pause Download"}
-                        onClick={() => window.torrentApi.pauseTorrent(t.infoHash)}
-                      >
-                        {t.done ? <Square size={14} className="fill-current" /> : <Pause size={14} className="fill-current" />}
-                        <span className="ml-2 text-xs font-medium uppercase tracking-wider">{t.done ? 'Stop' : 'Pause'}</span>
-                      </button>
-                    )}
-                    {t.magnetURI && (
-                      <button 
-                        className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-300" 
-                        title="Copy Magnet Link"
-                        onClick={() => window.torrentApi.copyToClipboard(t.magnetURI!)}
-                      >
-                        <Copy size={16} />
-                      </button>
-                    )}
-                    {!t.done && (
-                      <button
-                        className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-300"
-                        title="Download Sequentially"
-                        onClick={() => {
-                          if (window.torrentApi) {
-                            window.torrentApi.setSequential(t.infoHash, true)
-                          }
-                        }}
-                      >
-                        <ListOrdered size={16} />
-                      </button>
-                    )}
-                    {t.path && (
-                      <button 
-                        className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-300" 
-                        title="Open Folder"
-                        onClick={() => {
-                          const isSingleFile = t.files && t.files.length === 1
-                          const hasMetadata = t.name && t.name !== 'Fetching metadata...'
-                          const torrentFolder = (hasMetadata && !isSingleFile && t.path) ? (t.path + '/' + t.name) : t.path!
-                          window.torrentApi.openFolder(torrentFolder)
-                        }}
-                      >
-                        <FolderOpen size={16} />
-                      </button>
-                    )}
-                    <button 
-                      className="p-2 bg-gray-700 hover:bg-red-600 rounded-lg text-gray-300 hover:text-white"
-                      title="Remove from list (Downloads remain on disk)"
-                      onClick={() => handleRemove(t.infoHash, t.name)}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </div>
-                
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm text-gray-400">
-                    <span>{(t.progress * 100).toFixed(1)}% • {formatBytes(t.downloaded)} / {formatBytes(t.length)}</span>
-                    <div className="flex items-center space-x-3">
-                      <span className="flex items-center"><ArrowDown size={12} className="mr-1 text-green-400" />{formatBytes(t.downloadSpeed)}/s</span>
-                      <span className="flex items-center"><ArrowUp size={12} className="mr-1 text-blue-400" />{formatBytes(t.uploadSpeed)}/s</span>
-                    </div>
-                  </div>
+
+              {/* Dual-Curve Live Bandwidth History Chart (Last 60 Seconds) */}
+              <div className="glass-card p-4 rounded-2xl border border-white bg-white/70 shadow-2xs flex flex-col space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800">Bandwidth History (Last 60s)</span>
                   
-                  <div className="h-2 w-full bg-gray-700 rounded-full overflow-hidden" role="progressbar" aria-valuenow={Math.round(t.progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label={`Download progress: ${Math.round(t.progress * 100)}%`}>
-                    <div 
-                      className={`h-full bg-blue-500 rounded-full transition-all duration-300 ease-out ${t.done ? 'bg-green-500' : ''}`}
-                      style={{ width: `${t.progress * 100}%` }}
-                    />
-                  </div>
-                  
-                  <div className="flex justify-between text-xs text-gray-500 pt-1">
-                    <span>Seeders / Peers: {t.numPeers}</span>
-                    <span>{t.done ? 'Completed' : `ETA: ${formatTime(t.timeRemaining)}`}</span>
+                  {/* Legend */}
+                  <div className="flex items-center gap-3 text-[11px] font-mono">
+                    <span className="flex items-center gap-1.5 text-emerald-600 font-semibold">
+                      <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 inline-block"></span>
+                      Download
+                    </span>
+                    <span className="flex items-center gap-1.5 text-blue-600 font-semibold">
+                      <span className="w-2.5 h-2.5 rounded-xs bg-blue-500 inline-block"></span>
+                      Upload
+                    </span>
                   </div>
                 </div>
 
-                {expandedHash === t.infoHash && (
-                  <div className="mt-4 pt-4 border-t border-gray-700" onClick={e => e.stopPropagation()}>
-                    <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                      <div className="space-y-2">
-                        <h4 className="font-semibold text-gray-300">Data Transfer</h4>
-                        <div className="bg-gray-900/50 p-3 rounded-lg space-y-1">
-                          <div className="flex justify-between"><span className="text-gray-500">Uploaded:</span> <span className="text-gray-300">{formatBytes(t.uploaded)}</span></div>
-                          <div className="flex justify-between"><span className="text-gray-500">Downloaded:</span> <span className="text-gray-300">{formatBytes(t.downloaded)}</span></div>
-                          <div className="flex justify-between"><span className="text-gray-500">Share Ratio:</span> <span className="text-gray-300">{t.ratio ? t.ratio.toFixed(2) : '0.00'}</span></div>
-                          <div className="flex justify-between"><span className="text-gray-500">Size:</span> <span className="text-gray-300">{formatBytes(t.length)}</span></div>
-                        </div>
-                        <h4 className="font-semibold text-gray-300 pt-2">Trackers</h4>
-                        <div className="bg-gray-900/50 p-3 rounded-lg max-h-32 overflow-y-auto custom-scrollbar text-xs text-gray-400">
-                          {t.announce && t.announce.length > 0 ? (
-                            <ul className="list-disc pl-4 space-y-1">
-                              {t.announce.map((url, i) => <li key={i} className="break-all">{url}</li>)}
-                            </ul>
-                          ) : (
-                            <span className="italic">No trackers (DHT/PEX only)</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <h4 className="font-semibold text-gray-300">Information</h4>
-                        <div className="bg-gray-900/50 p-3 rounded-lg space-y-1 text-xs break-all">
-                          <div className="text-gray-500 font-semibold mb-1">InfoHash:</div>
-                          <div className="text-gray-300 bg-gray-800 p-1.5 rounded">{t.infoHash}</div>
-                          {t.path && (
-                            <div className="mt-3">
-                              <div className="text-gray-500 font-semibold mb-1">Save Path:</div>
-                              <div className="text-gray-300 bg-gray-800 p-1.5 rounded">{t.path}</div>
-                            </div>
-                          )}
-                          {t.created && (
-                            <div className="flex justify-between mt-3 pt-2 border-t border-gray-700/50">
-                              <span className="text-gray-500">Created:</span> 
-                              <span className="text-gray-300">{new Date(t.created).toLocaleDateString()}</span>
-                            </div>
-                          )}
-                          {t.createdBy && (
-                            <div className="flex justify-between pt-1">
-                              <span className="text-gray-500">Created By:</span> 
-                              <span className="text-gray-300">{t.createdBy}</span>
-                            </div>
-                          )}
-                          {t.comment && (
-                            <div className="pt-2">
-                              <span className="text-gray-500">Comment:</span> 
-                              <p className="text-gray-300 mt-1 italic">{t.comment}</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                {/* SVG Graph Container */}
+                <div className="relative w-full h-44 bg-slate-50/80 rounded-xl p-3 border border-slate-200/50 flex flex-col justify-between">
+                  {(() => {
+                    let maxSpeed = 1024 * 1024; // 1 MB/s floor
+                    speedHistory.forEach(s => {
+                      if (s.down > maxSpeed) maxSpeed = s.down;
+                      if (s.up > maxSpeed) maxSpeed = s.up;
+                    });
+                    maxSpeed *= 1.15; // 15% headroom
 
-                    {t.files && t.files.length > 0 && (
-                      <div className="pt-2">
-                        <h4 className="text-sm font-semibold text-gray-300 mb-2">Files</h4>
-                        <ul className="space-y-2 max-h-48 overflow-y-auto pr-2 custom-scrollbar list-none">
-                          {t.files.map((f: any, i: number) => (
-                            <li key={i} className={`flex justify-between items-center bg-gray-900/50 p-2 rounded border border-gray-700/50 ${f.skipped ? 'opacity-50 grayscale' : ''}`}>
-                              <div className="flex flex-col overflow-hidden flex-1 pr-4">
-                                <span className={`truncate ${f.skipped ? 'line-through text-gray-500' : ''}`} title={f.name}>{f.name}</span>
-                                <span className="text-xs text-gray-500">
-                                  {(f.length / 1024 / 1024).toFixed(2)} MB • {Math.round(f.progress * 100)}% {f.skipped ? '(Skipped)' : ''}
-                                </span>
-                                <PieceMap pieces={f.pieceMap} />
-                              </div>
-                              <div className="flex gap-2 flex-shrink-0">
-                                {f.skipped ? (
-                                  <button
-                                    onClick={async () => {
-                                      if (window.torrentApi) {
-                                        await window.torrentApi.prioritizeFile(t.infoHash, i)
-                                      }
-                                    }}
-                                    title="Resume Download"
-                                    className="p-1 hover:text-green-400 hover:bg-gray-800 rounded transition-colors"
-                                  >
-                                    <ArrowUp size={14} />
-                                  </button>
-                                ) : (
-                                  <button
-                                    onClick={async () => {
-                                      if (window.torrentApi) {
-                                        await window.torrentApi.skipFile(t.infoHash, i)
-                                      }
-                                    }}
-                                    title="Skip/Do Not Download"
-                                    className="p-1 hover:text-red-400 hover:bg-gray-800 rounded transition-colors"
-                                  >
-                                    <Ban size={14} />
-                                  </button>
-                                )}
-                                  {/* Stream in App button */}
-                                  <button
-                                    onClick={async () => {
-                                      if (window.torrentApi) {
-                                        try {
-                                          const url = await window.torrentApi.startStream(t.infoHash, i)
-                                          setActiveStreamUrl(url)
-                                        } catch (err: any) {
-                                          alert('Failed to start stream: ' + err.message)
-                                        }
-                                      }
-                                    }}
-                                    title="Play In App"
-                                    className="p-1 hover:text-green-400 hover:bg-gray-800 rounded transition-colors"
-                                  >
-                                    <PlayCircle size={14} />
-                                  </button>
-                                  <button
-                                    onClick={async () => {
-                                      if (window.torrentApi) {
-                                        try {
-                                          await window.torrentApi.playExternal(t.infoHash, i)
-                                        } catch (err: any) {
-                                          alert('Failed to play in external app. You may need to configure your Media Player path in Settings.\n\nError: ' + err.message)
-                                        }
-                                      }
-                                    }}
-                                    title="Play in External App (VLC, IINA, etc.)"
-                                    className="p-1 hover:text-orange-400 hover:bg-gray-800 rounded transition-colors"
-                                  >
-                                    <MonitorPlay size={14} />
-                                  </button>
-                                <button
-                                  onClick={async () => {
-                                    if (window.torrentApi) {
-                                      try {
-                                        const url = await window.torrentApi.startStream(t.infoHash, i)
-                                        await window.torrentApi.copyToClipboard(url)
-                                      } catch (err: any) {
-                                        alert('Failed to copy stream link: ' + err.message)
-                                      }
-                                    }
-                                  }}
-                                  title="Copy Stream URL"
-                                  className="p-1 hover:text-blue-400 hover:bg-gray-800 rounded transition-colors"
-                                >
-                                  <Link size={14} />
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    if (window.torrentApi && t.path && f.path) {
-                                      // Construct full file path - path joining handled server-side (#13)
-                                      window.torrentApi.openFolder(t.path + '/' + f.path)
-                                    } else if (window.torrentApi && t.path) {
-                                      window.torrentApi.openFolder(t.path)
-                                    }
-                                  }}
-                                  title="Show in Finder"
-                                  className="p-1 hover:text-yellow-400 hover:bg-gray-800 rounded transition-colors"
-                                >
-                                  <FolderOpen size={14} />
-                                </button>
-                              </div>
-                              </li>
-                            ))}
-                        </ul>
+                    const width = 100;
+                    const height = 100;
+
+                    const downPoints = speedHistory.map((s, i) => {
+                      const x = (i / (Math.max(60, speedHistory.length) - 1)) * width;
+                      const y = height - (s.down / maxSpeed) * height;
+                      return `${x}%,${y}%`;
+                    }).join(' ');
+
+                    const upPoints = speedHistory.map((s, i) => {
+                      const x = (i / (Math.max(60, speedHistory.length) - 1)) * width;
+                      const y = height - (s.up / maxSpeed) * height;
+                      return `${x}%,${y}%`;
+                    }).join(' ');
+
+                    const lastX = speedHistory.length > 0 ? ((speedHistory.length - 1) / (Math.max(60, speedHistory.length) - 1)) * width : 0;
+
+                    return (
+                      <>
+                        <svg className="absolute inset-x-3 inset-y-3 w-[calc(100%-24px)] h-[calc(100%-24px)] overflow-visible" preserveAspectRatio="none">
+                          <defs>
+                            <linearGradient id="statDownGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#10b981" stopOpacity="0.3"/>
+                              <stop offset="100%" stopColor="#10b981" stopOpacity="0"/>
+                            </linearGradient>
+                            <linearGradient id="statUpGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.25"/>
+                              <stop offset="100%" stopColor="#3b82f6" stopOpacity="0"/>
+                            </linearGradient>
+                          </defs>
+
+                          {speedHistory.length >= 2 && (
+                            <>
+                              {/* Down Fill & Stroke */}
+                              <polygon points={`0%,100% ${downPoints} ${lastX}%,100%`} fill="url(#statDownGrad)" />
+                              <polyline points={downPoints} fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+
+                              {/* Up Fill & Stroke */}
+                              <polygon points={`0%,100% ${upPoints} ${lastX}%,100%`} fill="url(#statUpGrad)" />
+                              <polyline points={upPoints} fill="none" stroke="#3b82f6" strokeWidth="2" strokeDasharray="3 3" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                            </>
+                          )}
+                        </svg>
+
+                        {/* Y-Axis Scale Indicators */}
+                        <div className="absolute right-2 top-2 text-[9px] font-mono text-slate-400 pointer-events-none bg-white/70 px-1.5 py-0.5 rounded">
+                          {formatBytes(maxSpeed)}/s
+                        </div>
+                        <div className="absolute right-2 top-[48%] text-[9px] font-mono text-slate-400 pointer-events-none bg-white/70 px-1.5 py-0.5 rounded">
+                          {formatBytes(maxSpeed / 2)}/s
+                        </div>
+                        <div className="absolute right-2 bottom-2 text-[9px] font-mono text-slate-400 pointer-events-none bg-white/70 px-1.5 py-0.5 rounded">
+                          0 B/s
+                        </div>
+
+                        {/* X-Axis Timeline Markers */}
+                        <div className="absolute left-3 bottom-1 flex justify-between w-[calc(100%-80px)] text-[9px] font-mono text-slate-400 pointer-events-none">
+                          <span>-60s</span>
+                          <span>-45s</span>
+                          <span>-30s</span>
+                          <span>-15s</span>
+                          <span>Now</span>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Swarm & Peer Health Card */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="glass-card p-3.5 rounded-2xl border border-white bg-white/70 shadow-2xs flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                      👥
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-800">Connected Swarm Peers</div>
+                      <div className="text-[10px] text-slate-400">Total leechers contributing bandwidth</div>
+                    </div>
+                  </div>
+                  <span className="text-lg font-mono font-bold text-blue-600">{totalPeers}</span>
+                </div>
+
+                <div className="glass-card p-3.5 rounded-2xl border border-white bg-white/70 shadow-2xs flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                      🌱
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-800">Verified Seeds Online</div>
+                      <div className="text-[10px] text-slate-400">Complete file hosts across swarms</div>
+                    </div>
+                  </div>
+                  <span className="text-lg font-mono font-bold text-emerald-600">{totalSeeds}</span>
+                </div>
+              </div>
+
+              {/* Top Bandwidth Consuming Torrents Table */}
+              <div className="glass-card p-4 rounded-2xl border border-white bg-white/70 shadow-2xs space-y-2.5">
+                <h4 className="text-xs font-bold text-slate-800 flex items-center justify-between">
+                  <span>Active Swarm Traffic Distribution</span>
+                  <span className="text-[10px] text-slate-400 font-mono">{torrents.length} registered transfers</span>
+                </h4>
+
+                {torrents.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-4 text-center">No active transfers contributing to traffic</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {torrents.slice(0, 5).map((t) => (
+                      <div key={t.infoHash} className="p-2.5 rounded-xl bg-white/80 border border-slate-200/60 flex items-center justify-between text-xs">
+                        <div className="truncate mr-3 flex-1 min-w-0">
+                          <span className="font-bold text-slate-800 truncate block">{t.name || 'Fetching metadata...'}</span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {formatBytes(t.downloaded)} of {formatBytes(t.length)} ({(t.progress * 100).toFixed(1)}%)
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-4 font-mono text-[11px] shrink-0">
+                          <span className="text-emerald-600 font-semibold">↓ {formatBytes(t.downloadSpeed)}/s</span>
+                          <span className="text-blue-600">↑ {formatBytes(t.uploadSpeed)}/s</span>
+                          <span className="text-slate-400 text-[10px]">Ratio: {t.ratio ? t.ratio.toFixed(2) : '0.00'}</span>
+                        </div>
                       </div>
-                    )}
+                    ))}
                   </div>
                 )}
               </div>
-            ))
+
+            </div>
+          ) : activeTab === 'settings' ? (
+            <div className="max-w-3xl mx-auto w-full">
+              <SettingsComponent />
+            </div>
+          ) : displayedTorrents.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-3 py-20">
+              <div className="w-16 h-16 rounded-3xl bg-white/60 border border-white flex items-center justify-center text-2xl shadow-sm text-slate-400">
+                ⚡
+              </div>
+              <p className="text-sm font-semibold text-slate-600">No transfers found</p>
+              <p className="text-xs text-slate-400 max-w-xs text-center">
+                Click + Add or drag and drop a .torrent or magnet link to begin streaming.
+              </p>
+            </div>
+          ) : (
+            displayedTorrents.map((t) => {
+              const isInspectorOpen = inspectorHash === t.infoHash
+              const isMenuAnchorActive = menuAnchor?.hash === t.infoHash
+              return (
+              <div 
+                key={t.infoHash} 
+                onClick={() => setInspectorHash(prev => prev === t.infoHash ? null : t.infoHash)}
+                className={`glass-row rounded-2xl p-4 flex flex-col gap-3 cursor-pointer transition-all ${
+                  isInspectorOpen ? 'ring-2 ring-blue-500/40 bg-white/95' : ''
+                }`}
+              >
+                <div className="flex items-center justify-between gap-4">
+                  
+                  {/* Torrent Title & Metrics */}
+                  <div className="space-y-1 flex-1 min-w-0">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-sm font-bold text-slate-900 truncate tracking-tight">
+                        {t.name || 'Fetching metadata...'}
+                      </span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                        t.done 
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80' 
+                          : t.paused 
+                            ? 'bg-amber-50 text-amber-700 border-amber-200/80' 
+                            : 'bg-blue-50 text-blue-700 border-blue-200/80'
+                      }`}>
+                        {t.done ? 'Seeding' : t.paused ? 'Paused' : 'Downloading'}
+                      </span>
+                    </div>
+
+                    <div className="text-xs text-slate-500 font-mono flex items-center gap-3">
+                      <span>{formatBytes(t.downloaded)} / {formatBytes(t.length)} ({(t.progress * 100).toFixed(1)}%)</span>
+                      <span className="text-slate-300">•</span>
+                      <span className="text-emerald-600 font-semibold">↓ {formatBytes(t.downloadSpeed)}/s</span>
+                      <span className="text-slate-300">•</span>
+                      <span>{t.done ? 'Finished' : `ETA ${formatTime(t.timeRemaining)}`}</span>
+                      <span className="text-slate-300">•</span>
+                      <span>Seeds: {t.numSeeds || 0} / Peers: {t.numPeers || 0}</span>
+                    </div>
+                  </div>
+
+                  {/* Action Cluster: Play + Pause + 3-Dot Overflow */}
+                  <div className="flex items-center gap-1.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                    
+                    {/* Play in OmniPlayer Button */}
+                    <button 
+                      onClick={() => playInOmniPlayer(t.infoHash, undefined, t.name)}
+                      className="glass-btn px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1.5 shadow-2xs"
+                      title="Stream instantly in embedded OmniPlayer"
+                    >
+                      <Play size={12} className="fill-current text-indigo-600" />
+                      <span>Play</span>
+                    </button>
+
+                    {/* Pause / Resume Button */}
+                    {t.paused ? (
+                      <button 
+                        onClick={() => window.torrentApi?.resumeTorrent(t.infoHash)}
+                        className="glass-btn w-8 h-8 rounded-xl flex items-center justify-center text-xs text-emerald-600 hover:text-emerald-700"
+                        title="Resume Transfer"
+                      >
+                        <Play size={12} className="fill-current" />
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => window.torrentApi?.pauseTorrent(t.infoHash)}
+                        className="glass-btn w-8 h-8 rounded-xl flex items-center justify-center text-xs text-slate-600 hover:text-slate-900"
+                        title="Pause Transfer"
+                      >
+                        <Pause size={12} className="fill-current" />
+                      </button>
+                    )}
+
+                    {/* 3-Dot Base Menu Trigger */}
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (menuAnchor?.hash === t.infoHash) {
+                          setMenuAnchor(null)
+                        } else {
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          setMenuAnchor({
+                            hash: t.infoHash,
+                            top: rect.bottom + 6,
+                            right: window.innerWidth - rect.right,
+                            bottom: window.innerHeight - rect.top + 6
+                          })
+                        }
+                      }}
+                      className={`glass-btn w-8 h-8 rounded-xl flex items-center justify-center text-xs transition ${
+                        isMenuAnchorActive ? 'bg-slate-200/90 text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                      title="More Options"
+                    >
+                      •••
+                    </button>
+                  </div>
+                </div>
+
+                {/* Slim Gradient Progress Bar */}
+                <div className="w-full h-1.5 bg-slate-200/60 rounded-full overflow-hidden p-0.5 border border-white">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      t.done 
+                        ? 'bg-emerald-500 shadow-xs' 
+                        : t.paused 
+                          ? 'bg-amber-400' 
+                          : 'bg-gradient-to-r from-blue-500 to-indigo-500 shadow-xs animate-pulse'
+                    }`}
+                    style={{ width: `${Math.max(t.progress * 100, 2)}%` }}
+                  />
+                </div>
+              </div>
+            )})
           )}
-        </main>
+
+        </div>
+
+        {/* Collapsible Right-Hand Side Panel (Inspector Drawer) */}
+        {currentInspectorTorrent && (
+          <div className="w-84 glass-sidepanel flex flex-col justify-between p-4 z-20 animate-fade-in-up">
+            <div className="space-y-4">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-slate-200/70 pb-3">
+                <div className="flex items-center gap-2">
+                  <Layers size={15} className="text-blue-600" />
+                  <span className="text-xs font-bold text-slate-900">Side Inspector</span>
+                </div>
+                <button 
+                  onClick={() => setInspectorHash(null)}
+                  className="w-6 h-6 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-800 text-xs"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              {/* Meta Card */}
+              <div>
+                <h4 className="text-xs font-bold text-slate-900 truncate" title={currentInspectorTorrent.name}>
+                  {currentInspectorTorrent.name}
+                </h4>
+                <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                  {formatBytes(currentInspectorTorrent.downloaded)} of {formatBytes(currentInspectorTorrent.length)} ({(currentInspectorTorrent.progress > 1 ? currentInspectorTorrent.progress : currentInspectorTorrent.progress * 100).toFixed(1)}%)
+                </div>
+              </div>
+
+              {/* Sidepanel Tabs */}
+              <div className="flex gap-1 border-b border-slate-200/70 pb-2 text-xs font-semibold text-slate-500">
+                <button 
+                  onClick={() => setInspectorTab('files')}
+                  className={`pb-1 px-1 transition-colors ${inspectorTab === 'files' ? 'text-blue-600 border-b-2 border-blue-600 font-bold' : 'hover:text-slate-800'}`}
+                >
+                  Files ({currentInspectorTorrent.files?.length || 0})
+                </button>
+                <button 
+                  onClick={() => setInspectorTab('peers')}
+                  className={`pb-1 px-1 transition-colors ${inspectorTab === 'peers' ? 'text-blue-600 border-b-2 border-blue-600 font-bold' : 'hover:text-slate-800'}`}
+                >
+                  Peers ({currentInspectorTorrent.numPeers || 0})
+                </button>
+                <button 
+                  onClick={() => setInspectorTab('trackers')}
+                  className={`pb-1 px-1 transition-colors ${inspectorTab === 'trackers' ? 'text-blue-600 border-b-2 border-blue-600 font-bold' : 'hover:text-slate-800'}`}
+                >
+                  Trackers
+                </button>
+                <button 
+                  onClick={() => setInspectorTab('pieces')}
+                  className={`pb-1 px-1 transition-colors ${inspectorTab === 'pieces' ? 'text-blue-600 border-b-2 border-blue-600 font-bold' : 'hover:text-slate-800'}`}
+                >
+                  Pieces
+                </button>
+              </div>
+
+              {/* Tab: Files */}
+              {inspectorTab === 'files' && (
+                <div className="space-y-2 text-xs max-h-72 overflow-y-auto custom-scroll pr-1">
+                  {currentInspectorTorrent.files && currentInspectorTorrent.files.length > 0 ? (
+                    currentInspectorTorrent.files.map((file, i) => (
+                      <div key={i} className="p-2.5 rounded-xl bg-white border border-slate-200/80 flex flex-col gap-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <div className="truncate mr-2 flex-1">
+                            <div className="font-bold text-slate-800 truncate" title={file.name}>
+                              {file.name}
+                            </div>
+                            <div className="text-[10px] text-slate-500 font-mono">
+                              {formatBytes(file.length)} • {(file.progress * 100).toFixed(0)}%
+                            </div>
+                          </div>
+                          <button 
+                            onClick={() => playInOmniPlayer(currentInspectorTorrent.infoHash, i, file.name)}
+                            className="glass-btn px-2.5 py-1 rounded-lg text-[10px] font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 shrink-0"
+                          >
+                            <Play size={10} className="fill-current" /> Stream
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-1 text-[10px] font-semibold text-slate-500 pt-1 border-t border-slate-100">
+                          <span className="text-slate-400 mr-1">Priority:</span>
+                          <button
+                            onClick={() => handleSetPriority(currentInspectorTorrent.infoHash, i, 7)}
+                            className="px-2 py-0.5 rounded-md hover:bg-blue-50 text-blue-600 hover:text-blue-700 border border-slate-200"
+                          >
+                            High
+                          </button>
+                          <button
+                            onClick={() => handleSetPriority(currentInspectorTorrent.infoHash, i, 4)}
+                            className="px-2 py-0.5 rounded-md hover:bg-slate-50 text-slate-600 hover:text-slate-800 border border-slate-200"
+                          >
+                            Normal
+                          </button>
+                          <button
+                            onClick={() => handleSetPriority(currentInspectorTorrent.infoHash, i, 0)}
+                            className="px-2 py-0.5 rounded-md hover:bg-red-50 text-red-500 hover:text-red-700 border border-slate-200"
+                          >
+                            Skip
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-xs text-slate-400 py-6 text-center">No file details yet</div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab: Peers */}
+              {inspectorTab === 'peers' && (
+                <div className="space-y-2 text-[11px] max-h-72 overflow-y-auto custom-scroll">
+                  <div className="grid grid-cols-2 gap-2 font-mono">
+                    <div className="p-2 bg-white rounded-lg border border-slate-200/60 flex justify-between">
+                      <span className="text-slate-600">Peers</span>
+                      <span className="text-blue-600 font-bold">{currentInspectorTorrent.numPeers || peerList.length}</span>
+                    </div>
+                    <div className="p-2 bg-white rounded-lg border border-slate-200/60 flex justify-between">
+                      <span className="text-slate-600">Seeds</span>
+                      <span className="text-emerald-600 font-bold">{currentInspectorTorrent.numSeeds || 0}</span>
+                    </div>
+                  </div>
+
+                  {peerList.length > 0 ? (
+                    <div className="space-y-1 font-mono">
+                      {peerList.map((p, idx) => (
+                        <div key={idx} className="p-2 bg-white rounded-lg border border-slate-200/60 flex flex-col gap-1 text-[10px]">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-slate-800 truncate mr-2">{p.ip}</span>
+                            <span className="px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 font-semibold">{p.source || 'Peer'}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-slate-500">
+                            <span className="truncate max-w-[120px]">{p.client}</span>
+                            <span className="text-blue-600 font-semibold">{(p.progress * 100).toFixed(0)}%</span>
+                          </div>
+                          <div className="flex items-center justify-between text-[9px] text-slate-400 pt-0.5 border-t border-slate-100">
+                            <span>↓ {formatBytes(p.down_speed || 0)}/s • ↑ {formatBytes(p.up_speed || 0)}/s</span>
+                            {p.flags && <span className="text-slate-400 truncate max-w-[110px]">{p.flags}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-slate-400 italic text-center py-6 text-xs">Waiting for swarm handshakes...</div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab: Trackers */}
+              {inspectorTab === 'trackers' && (
+                <div className="space-y-2 text-[10px] font-mono max-h-72 overflow-y-auto custom-scroll">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-slate-700">Trackers ({trackerList.length || currentInspectorTorrent.announce?.length || 0})</span>
+                    <button
+                      onClick={() => handleReannounce(currentInspectorTorrent.infoHash)}
+                      className="glass-btn px-2 py-0.5 rounded text-[10px] font-bold text-blue-600 hover:text-blue-700"
+                    >
+                      Reannounce
+                    </button>
+                  </div>
+
+                  {/* Add Tracker Form */}
+                  <form onSubmit={(e) => handleAddTracker(e, currentInspectorTorrent.infoHash)} className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={newTrackerUrl}
+                      onChange={(e) => setNewTrackerUrl(e.target.value)}
+                      placeholder="udp://tracker.opentrackr.org:1337/announce"
+                      className="flex-1 px-2 py-1 bg-white rounded-lg border border-slate-200 text-[10px] focus:outline-none focus:border-blue-400"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isAddingTracker || !newTrackerUrl.trim()}
+                      className="glass-btn-primary px-2.5 py-1 rounded-lg text-[10px] font-bold disabled:opacity-50 shrink-0"
+                    >
+                      Add
+                    </button>
+                  </form>
+
+                  {trackerList.length > 0 ? (
+                    trackerList.map((tr, i) => (
+                      <div key={i} className="p-2 bg-white rounded-lg border border-slate-200/60 flex flex-col gap-0.5">
+                        <div className="break-all font-semibold text-slate-800">{tr.url}</div>
+                        <div className="flex items-center justify-between text-[9px] text-slate-500 pt-0.5">
+                          <span className={tr.status?.toLowerCase().includes('working') ? 'text-emerald-600 font-bold' : 'text-slate-500'}>
+                            {tr.status}
+                          </span>
+                          <span>Seeds: {tr.seeds || 0} • Peers: {tr.peers || 0}</span>
+                        </div>
+                        {tr.message && <div className="text-[9px] text-amber-600 italic truncate">{tr.message}</div>}
+                      </div>
+                    ))
+                  ) : currentInspectorTorrent.announce && currentInspectorTorrent.announce.length > 0 ? (
+                    currentInspectorTorrent.announce.map((url, i) => (
+                      <div key={i} className="p-2 bg-white rounded-lg border border-slate-200/60 break-all text-slate-700">
+                        {url}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-slate-400 italic text-center py-4">DHT / PEX Swarm Only</div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab: Pieces */}
+              {inspectorTab === 'pieces' && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
+                    <span>Swarm Piece Bitfield:</span>
+                    <span>
+                      {pieceInfo?.num_pieces ? `${pieceInfo.num_pieces} Pieces (${formatBytes(pieceInfo.piece_length || 0)}/ea)` : 'Verifying...'}
+                    </span>
+                  </div>
+
+                  {pieceInfo?.bitfield ? (
+                    <div className="p-2.5 bg-slate-100/90 rounded-xl border border-slate-200 max-h-48 overflow-y-auto custom-scroll">
+                      <div className="flex flex-wrap gap-0.5">
+                        {pieceInfo.bitfield.slice(0, 300).split('').map((bit, idx) => {
+                          const isDone = bit === '1';
+                          const avail = pieceInfo.availability?.[idx] || 0;
+                          return (
+                            <div
+                              key={idx}
+                              title={`Piece #${idx} - ${isDone ? 'Verified' : 'Missing'} (Swarm Avail: ${avail})`}
+                              className={`w-2.5 h-2.5 rounded-2xs cursor-pointer transition-all hover:scale-125 ${
+                                isDone 
+                                  ? 'bg-blue-600 shadow-2xs' 
+                                  : avail > 0 
+                                    ? 'bg-slate-300 hover:bg-slate-400' 
+                                    : 'bg-slate-200'
+                              }`}
+                            />
+                          );
+                        })}
+                      </div>
+                      {pieceInfo.num_pieces > 300 && (
+                        <div className="text-[9px] font-mono text-slate-400 text-center mt-2">
+                          Showing first 300 of {pieceInfo.num_pieces} pieces
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="p-2 bg-slate-100/90 rounded-xl border border-slate-200 flex flex-wrap gap-0.5 max-h-36 overflow-hidden">
+                      {Array.from({ length: 48 }).map((_, i) => (
+                        <div 
+                          key={i} 
+                          className={`w-2 h-2 rounded-2xs ${
+                            i / 48 <= (currentInspectorTorrent.progress > 1 ? currentInspectorTorrent.progress / 100 : currentInspectorTorrent.progress) 
+                              ? 'bg-blue-500' 
+                              : 'bg-slate-300'
+                          }`} 
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-3 text-[10px] font-mono text-slate-500 justify-end pt-1">
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-2xs bg-blue-600"></span> Verified</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-2xs bg-slate-300"></span> In Swarm</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-2xs bg-slate-200"></span> Missing</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Bottom Quick Stream Button */}
+            <button 
+              onClick={() => playInOmniPlayer(currentInspectorTorrent.infoHash, undefined, currentInspectorTorrent.name)}
+              className="w-full glass-btn-primary font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-1.5 shadow-sm mt-4"
+            >
+              <Play size={13} className="fill-current" />
+              <span>Stream in OmniPlayer</span>
+            </button>
+          </div>
+        )}
+
       </div>
 
-      {/* Add Modal */}
+      {/* Add Torrent Modal Sheet */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl">
-            <h3 className="text-xl font-semibold mb-4 text-gray-100">Add New Torrent</h3>
-            <form onSubmit={handleAddTorrent}>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-1">Magnet Link or .torrent URL</label>
+        <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in-up">
+          <div className="w-full max-w-lg glass-window p-6 rounded-3xl space-y-4 shadow-2xl border border-white bg-white/95">
+            <div className="flex justify-between items-center border-b border-slate-200/70 pb-3">
+              <h3 className="text-sm font-bold text-slate-900">Add Torrent / Magnet Link</h3>
+              <button 
+                onClick={() => setShowAddModal(false)}
+                className="w-6 h-6 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-800"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddTorrent} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block text-slate-600 font-semibold mb-1">Paste Magnet URI, Info Hash, or .torrent URL</label>
+                <div className="relative flex items-center">
                   <input 
                     type="text" 
                     value={magnetLink}
                     onChange={(e) => setMagnetLink(e.target.value)}
-                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow placeholder-gray-600 mb-3"
-                    placeholder="magnet:?xt=urn:btih:... or https://..."
+                    placeholder="magnet:?xt=urn:btih:... or info hash or https://..."
+                    className="w-full p-2.5 pr-20 rounded-xl bg-white border border-slate-300 focus:outline-none focus:border-blue-500 font-mono text-[11px] shadow-2xs"
                     autoFocus
                   />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-1">Save Location (Leave blank for default)</label>
-                  <div className="flex space-x-2">
-                    <input 
-                      type="text" 
-                      value={customSavePath}
-                      onChange={(e) => setCustomSavePath(e.target.value)}
-                      className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-shadow placeholder-gray-600"
-                      placeholder="e.g. /Users/name/Downloads"
-                    />
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const folder = await window.torrentApi?.selectFolder();
-                        if (folder) setCustomSavePath(folder);
-                      }}
-                      className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-200 transition-colors"
-                    >
-                      Browse...
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-1">Or select a .torrent file</label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (window.torrentApi) {
-                          const path = await window.torrentApi.openTorrentDialog()
-                          if (path) {
-                            try {
-                              await window.torrentApi.addTorrent(path, customSavePath ? { savePath: customSavePath } : undefined)
-                              setShowAddModal(false)
-                            } catch (err: any) {
-                              setError(err.message || String(err))
-                            }
-                          }
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        let text = ''
+                        if (window.torrentApi?.readClipboard) {
+                          text = await window.torrentApi.readClipboard()
+                        } else if (navigator.clipboard) {
+                          text = await navigator.clipboard.readText()
                         }
-                      }}
-                      className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg transition-colors font-medium text-sm"
-                    >
-                      Browse...
-                    </button>
-                    <span className="text-sm text-gray-500 py-2">
-                      (You can also drag & drop .torrent files anywhere)
-                    </span>
-                  </div>
-                </div>
-                {error && <p className="text-red-400 text-sm">{error}</p>}
-                <div className="flex justify-end space-x-3 pt-2">
-                  <button 
-                    type="button" 
-                    onClick={() => setShowAddModal(false)}
-                    className="px-5 py-2.5 text-gray-300 hover:text-white bg-gray-700 hover:bg-gray-600 rounded-xl transition-colors font-medium"
+                        if (text) {
+                          const sanitized = sanitizeMagnetInput(text)
+                          setMagnetLink(sanitized)
+                          setError('')
+                        }
+                      } catch (err) {
+                        console.error('Failed to paste from clipboard:', err)
+                      }
+                    }}
+                    className="absolute right-2 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold border border-slate-300 transition-colors flex items-center gap-1"
+                    title="Paste from clipboard"
                   >
-                    Cancel
-                  </button>
-                  <button 
-                    type="submit"
-                    disabled={!magnetLink}
-                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 disabled:cursor-not-allowed text-white rounded-xl transition-colors font-medium shadow-lg shadow-blue-500/20"
-                  >
-                    Download
+                    <Copy size={11} />
+                    <span>Paste</span>
                   </button>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-600 font-semibold mb-1">Save Location</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    value={customSavePath}
+                    onChange={(e) => setCustomSavePath(e.target.value)}
+                    placeholder="~/Downloads"
+                    className="flex-1 p-2 rounded-xl bg-slate-50 border border-slate-200 font-mono text-[11px]"
+                  />
+                  <button 
+                    type="button"
+                    onClick={async () => {
+                      const folder = await window.torrentApi?.selectFolder();
+                      if (folder) setCustomSavePath(folder);
+                    }}
+                    className="glass-btn px-3 py-1.5 rounded-xl text-xs font-semibold"
+                  >
+                    Browse...
+                  </button>
+                </div>
+              </div>
+
+              {/* Browse .torrent file */}
+              <div 
+                onClick={async () => {
+                  if (window.torrentApi) {
+                    const path = await window.torrentApi.openTorrentDialog()
+                    if (path) {
+                      try {
+                        if (path !== 'torrent-added-via-file') await window.torrentApi.addTorrent(path, customSavePath || undefined)
+                        setShowAddModal(false)
+                      } catch (err: any) {
+                        setError(err.message || String(err))
+                      }
+                    }
+                  }
+                }}
+                className="border-2 border-dashed border-slate-300 hover:border-blue-400 rounded-2xl p-4 text-center bg-slate-50/60 cursor-pointer transition"
+              >
+                <span className="text-xl block mb-1">📂</span>
+                <span className="text-slate-700 font-semibold">Choose .torrent file from Mac</span>
+                <span className="text-slate-400 block text-[10px] mt-0.5">or drag & drop files anywhere in window</span>
+              </div>
+
+              {error && <p className="text-red-600 text-xs">{error}</p>}
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-200/70">
+                <button 
+                  type="button" 
+                  onClick={() => setShowAddModal(false)}
+                  className="glass-btn px-4 py-2 rounded-xl text-xs font-semibold text-slate-600"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={!magnetLink.trim()}
+                  className="glass-btn-primary px-5 py-2 rounded-xl text-xs font-bold disabled:opacity-50"
+                >
+                  Start Download
+                </button>
               </div>
             </form>
           </div>
@@ -951,25 +1686,25 @@ function App() {
 
       {/* Clipboard Magnet Toast */}
       {clipboardMagnet && (
-        <div className="fixed bottom-6 right-6 bg-gray-800 border border-blue-500/30 rounded-xl p-4 shadow-2xl flex items-start space-x-4 max-w-sm animate-fade-in-up z-50">
-          <div className="text-2xl mt-1">🧲</div>
-          <div className="flex-1">
-            <h4 className="text-gray-100 font-medium mb-1 text-sm">Magnet link detected</h4>
-            <p className="text-gray-400 text-xs truncate w-64 mb-3" title={clipboardMagnet}>{clipboardMagnet}</p>
-            <div className="flex space-x-2">
+        <div className="fixed bottom-6 right-6 glass-window bg-white/95 rounded-2xl p-4 shadow-2xl flex items-start space-x-3.5 max-w-sm z-50 border border-white">
+          <div className="text-2xl mt-0.5">🧲</div>
+          <div className="flex-1 min-w-0">
+            <h4 className="text-slate-900 font-bold text-xs">Magnet link detected</h4>
+            <p className="text-slate-500 text-[11px] truncate w-56 my-1" title={clipboardMagnet}>{clipboardMagnet}</p>
+            <div className="flex gap-2 mt-2">
               <button 
                 onClick={() => {
                   setMagnetLink(clipboardMagnet)
                   setShowAddModal(true)
                   setClipboardMagnet(null)
                 }}
-                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition-colors"
+                className="glass-btn-primary px-3 py-1 rounded-lg text-xs font-bold"
               >
                 Add Torrent
               </button>
               <button 
                 onClick={() => setClipboardMagnet(null)}
-                className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-xs font-medium transition-colors"
+                className="glass-btn px-3 py-1 rounded-lg text-xs font-semibold text-slate-600"
               >
                 Dismiss
               </button>
@@ -978,12 +1713,110 @@ function App() {
         </div>
       )}
 
-      {activeStreamUrl && (
+      {/* Embedded Video Player Overlay */}
+      {playerModal && (
         <VideoPlayer 
-          streamUrl={activeStreamUrl} 
-          onClose={() => setActiveStreamUrl(null)} 
+          streamUrl={playerModal.streamUrl} 
+          title={playerModal.title}
+          infoHash={playerModal.infoHash}
+          fileIndex={playerModal.fileIndex}
+          onClose={() => setPlayerModal(null)} 
         />
       )}
+
+      {/* Floating 3-Dot Action Menu (Rendered via React Portal at Root) */}
+      {menuAnchor && (() => {
+        const activeTorrent = torrents.find(t => t.infoHash === menuAnchor.hash)
+        if (!activeTorrent) return null
+        const openUpward = menuAnchor.top > window.innerHeight - 230
+
+        return createPortal(
+          <>
+            {/* Transparent backdrop for outside click dismiss */}
+            <div 
+              className="fixed inset-0 z-[9998] bg-transparent" 
+              onClick={(e) => {
+                e.stopPropagation()
+                setMenuAnchor(null)
+              }}
+            />
+
+            {/* Floating Menu Popover */}
+            <div 
+              className="fixed w-52 bg-white/95 backdrop-blur-2xl border border-slate-200/90 rounded-2xl shadow-2xl p-1.5 z-[9999] text-xs text-slate-700 space-y-0.5 animate-fade-in-up"
+              style={{
+                right: `${Math.max(12, menuAnchor.right)}px`,
+                top: openUpward ? undefined : `${menuAnchor.top}px`,
+                bottom: openUpward ? `${menuAnchor.bottom}px` : undefined,
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              <button 
+                onClick={() => { 
+                  setInspectorHash(activeTorrent.infoHash); 
+                  setMenuAnchor(null); 
+                }}
+                className="w-full text-left px-3 py-2 rounded-xl hover:bg-blue-50 text-blue-600 flex items-center gap-2.5 font-semibold transition-colors"
+              >
+                <Layers size={14} className="text-blue-500" />
+                <span>Open Side Inspector</span>
+              </button>
+
+              <button 
+                onClick={() => { 
+                  handleStop(activeTorrent.infoHash); 
+                  setMenuAnchor(null); 
+                }}
+                className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-700 flex items-center gap-2.5 font-medium transition-colors"
+              >
+                <Square size={14} className="text-slate-500" />
+                <span>Stop Torrent</span>
+              </button>
+
+              {activeTorrent.path && (
+                <button 
+                  onClick={() => {
+                    fetch((window.location.port === '5173' ? 'http://localhost:8080' : '') + '/api/torrents/' + activeTorrent.infoHash + '/open_folder', { method: 'POST' })
+                    setMenuAnchor(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-700 flex items-center gap-2.5 font-medium transition-colors"
+                >
+                  <FolderOpen size={14} className="text-slate-500" />
+                  <span>Show in Finder</span>
+                </button>
+              )}
+
+              {activeTorrent.magnetURI && (
+                <button 
+                  onClick={() => {
+                    window.torrentApi?.copyToClipboard(activeTorrent.magnetURI!);
+                    setMenuAnchor(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-700 flex items-center gap-2.5 font-medium transition-colors"
+                >
+                  <Copy size={14} className="text-slate-500" />
+                  <span>Copy Magnet</span>
+                </button>
+              )}
+
+              <div className="h-px bg-slate-200/60 my-1"></div>
+
+              <button 
+                onClick={() => { 
+                  handleRemove(activeTorrent.infoHash, activeTorrent.name); 
+                  setMenuAnchor(null); 
+                }}
+                className="w-full text-left px-3 py-2 rounded-xl hover:bg-red-50 text-red-600 flex items-center gap-2.5 font-semibold transition-colors"
+              >
+                <Trash2 size={14} className="text-red-500" />
+                <span>Delete Torrent</span>
+              </button>
+            </div>
+          </>,
+          document.body
+        )
+      })()}
+
     </div>
   )
 }

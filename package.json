@@ -2,31 +2,26 @@
   "name": "torrent-downloader",
   "private": true,
   "version": "1.0.16",
-  "description": "A simple torrent downloader built with Electron, Vite, and React",
+  "description": "A simple torrent downloader built with Vite, React, and libtorrent-rasterbar C++ engine",
   "author": "Abhishek Dutta <abhishek@example.com>",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && electron-builder",
-    "build:publish": "tsc && vite build && electron-builder --publish always",
-    "release": "npm version patch && git push --follow-tags",
-    "release:minor": "npm version minor && git push --follow-tags",
-    "release:major": "npm version major && git push --follow-tags",
+    "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "validate": "bash check_ui.sh"
   },
   "repository": "https://github.com/abhishekdutta18/TorrentDownloader",
   "dependencies": {
-    "electron-updater": "^6.8.9",
     "lucide-react": "^1.30.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "webtorrent": "^3.0.21"
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "@types/jsdom": "^30.0.0",
     "@types/react": "^18.2.64",
@@ -34,9 +29,6 @@
     "@typescript-eslint/eslint-plugin": "^7.1.1",
     "@typescript-eslint/parser": "^7.1.1",
     "@vitejs/plugin-react": "^6.0.5",
-    "electron": "^39.8.10",
-    "electron-builder": "^26.15.3",
-    "electron-playwright-helpers": "^3.1.2",
     "enhanced-resolve": "^5.24.5",
     "eslint": "^8.57.0",
     "eslint-plugin-react-hooks": "^4.6.0",
@@ -46,92 +38,6 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^5.2.2",
     "vite": "^8.2.1",
-    "vite-plugin-electron": "^1.1.1",
-    "vite-plugin-electron-renderer": "^1.0.0",
     "vitest": "^4.1.10"
-  },
-  "main": "dist-electron/main.js",
-  "build": {
-    "appId": "com.torrentdownloader.app",
-    "productName": "Torrent Downloader",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist",
-      "dist-electron"
-    ],
-    "protocols": {
-      "name": "Magnet Protocol",
-      "schemes": [
-        "magnet"
-      ]
-    },
-    "mac": {
-      "extendInfo": {
-        "NSDownloadsFolderUsageDescription": "Torrent Downloader needs access to your Downloads folder to save downloaded files.",
-        "NSDocumentsFolderUsageDescription": "Torrent Downloader needs access to your Documents folder to save downloaded files."
-      },
-      "identity": null,
-      "hardenedRuntime": false,
-      "gatekeeperAssess": false,
-      "category": "public.app-category.utilities",
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
-        }
-      ],
-      "artifactName": "${productName}-Mac-${version}-${arch}-Installer.${ext}"
-    },
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "artifactName": "${productName}-Windows-${version}-Setup.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "deleteAppDataOnUninstall": false
-    },
-    "linux": {
-      "target": [
-        "AppImage",
-        "deb"
-      ],
-      "category": "Network",
-      "artifactName": "${productName}-Linux-${version}.${ext}"
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "releaseType": "release"
-      }
-    ],
-    "npmRebuild": false,
-    "asarUnpack": [
-      "**/*.node"
-    ]
-  },
-  "overrides": {
-    "uuid": "^10.0.0",
-    "ip": "^1.1.9"
   }
 }

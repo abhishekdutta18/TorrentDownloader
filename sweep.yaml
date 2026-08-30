@@ -14,16 +14,15 @@ rules:
 gha_enabled: True
 
 # Project description to help Sweep understand your codebase.
-description: 'This is a desktop Torrent Downloader application built with Electron, Vite, TypeScript, and React. It uses WebTorrent for handling torrents.'
+description: 'This is a desktop Torrent Downloader application powered by libtorrent-rasterbar (C++17) with a React/Vite/TypeScript frontend.'
 
 # Directories Sweep should not edit
 blocked_dirs: 
   - "dist/"
-  - "dist-electron/"
+  - "cpp/build/"
   - "release/"
   - "node_modules/"
 
 # Documentation links to help Sweep understand specific dependencies if needed.
 docs:
-  - WebTorrent: ["https://webtorrent.io/docs"]
-  - Electron: ["https://www.electronjs.org/docs/latest"]
+  - libtorrent: ["https://libtorrent.org/reference.html"]
