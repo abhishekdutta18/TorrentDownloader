@@ -13,7 +13,10 @@ describe('Settings Component', () => {
         startOnBoot: false,
         mediaPlayerPath: '',
         rssFeeds: [],
-        rssRules: []
+        rssRules: [],
+        enableMalwareProtection: true,
+        autoSkipRiskyFiles: true,
+        enableCloudLookup: true
       }),
       saveSettings: vi.fn().mockResolvedValue({}),
     } as any
@@ -25,5 +28,21 @@ describe('Settings Component', () => {
     // It should load async settings
     const pathInput = await screen.findByDisplayValue('/downloads')
     expect(pathInput).toBeTruthy()
+  })
+
+  it('renders anti-malware and threat protection settings', async () => {
+    render(<Settings />)
+
+    const heading = await screen.findByText('Anti-Malware & Threat Protection')
+    expect(heading).toBeTruthy()
+
+    const realTimeToggle = screen.getByText('Enable Real-Time Threat Scanning')
+    expect(realTimeToggle).toBeTruthy()
+
+    const autoSkipToggle = screen.getByText('Auto-Skip Risky Executable Files')
+    expect(autoSkipToggle).toBeTruthy()
+
+    const cloudLookupToggle = screen.getByText('Cloud Threat Intelligence (MalwareBazaar)')
+    expect(cloudLookupToggle).toBeTruthy()
   })
 })

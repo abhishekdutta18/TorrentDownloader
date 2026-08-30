@@ -20,6 +20,7 @@
 #include "engine.hpp"
 #include "search.hpp"
 #include "rss_worker.hpp"
+#include "security.hpp"
 #include <fstream>
 #include <filesystem>
 
@@ -86,6 +87,9 @@ void load_global_settings(torrent::Engine& engine, torrent::RssWorker& rss_worke
     if (global_settings.contains("uploadLimit")) engine.set_upload_limit(global_settings["uploadLimit"].get<int>() / 1024);
     if (global_settings.contains("rssFeeds")) rss_worker.set_feeds(global_settings["rssFeeds"].get<std::vector<std::string>>());
     if (global_settings.contains("rssRules")) rss_worker.set_rules(global_settings["rssRules"].get<std::vector<std::string>>());
+    if (global_settings.contains("enableMalwareProtection")) torrent::SecurityManager::instance().set_enabled(global_settings["enableMalwareProtection"].get<bool>());
+    if (global_settings.contains("autoSkipRiskyFiles")) torrent::SecurityManager::instance().set_auto_skip_risky(global_settings["autoSkipRiskyFiles"].get<bool>());
+    if (global_settings.contains("enableCloudLookup")) torrent::SecurityManager::instance().set_cloud_lookup_enabled(global_settings["enableCloudLookup"].get<bool>());
 }
 void save_global_settings() {
     std::string home = getenv("HOME") ? getenv("HOME") : "/tmp";
@@ -100,6 +104,9 @@ void setup_settings_routes(httplib::Server& svr, torrent::Engine& engine, torren
         if (!global_settings.contains("uploadLimit")) global_settings["uploadLimit"] = engine.get_upload_limit() * 1024;
         if (!global_settings.contains("rssFeeds")) global_settings["rssFeeds"] = std::vector<std::string>();
         if (!global_settings.contains("rssRules")) global_settings["rssRules"] = std::vector<std::string>();
+        if (!global_settings.contains("enableMalwareProtection")) global_settings["enableMalwareProtection"] = torrent::SecurityManager::instance().is_enabled();
+        if (!global_settings.contains("autoSkipRiskyFiles")) global_settings["autoSkipRiskyFiles"] = torrent::SecurityManager::instance().is_auto_skip_risky();
+        if (!global_settings.contains("enableCloudLookup")) global_settings["enableCloudLookup"] = torrent::SecurityManager::instance().is_cloud_lookup_enabled();
         res.set_content(global_settings.dump(), "application/json");
     });
 
@@ -115,6 +122,9 @@ void setup_settings_routes(httplib::Server& svr, torrent::Engine& engine, torren
             if (body.contains("uploadLimit")) engine.set_upload_limit(body["uploadLimit"].get<int>() / 1024);
             if (body.contains("rssFeeds")) rss_worker.set_feeds(body["rssFeeds"].get<std::vector<std::string>>());
             if (body.contains("rssRules")) rss_worker.set_rules(body["rssRules"].get<std::vector<std::string>>());
+            if (body.contains("enableMalwareProtection")) torrent::SecurityManager::instance().set_enabled(body["enableMalwareProtection"].get<bool>());
+            if (body.contains("autoSkipRiskyFiles")) torrent::SecurityManager::instance().set_auto_skip_risky(body["autoSkipRiskyFiles"].get<bool>());
+            if (body.contains("enableCloudLookup")) torrent::SecurityManager::instance().set_cloud_lookup_enabled(body["enableCloudLookup"].get<bool>());
             save_global_settings();
             res.set_content(global_settings.dump(), "application/json");
         } catch (const std::exception& e) {
@@ -491,6 +501,17 @@ void setup_engine_routes(httplib::Server& svr, torrent::Engine& engine) {
         std::string hash = req.matches[1];
         int file_index = std::stoi(req.matches[2]);
         engine.prioritize_for_streaming(hash, file_index);
+
+        if (req.has_header("Range")) {
+            std::string range_val = req.get_header_value("Range");
+            size_t eq_pos = range_val.find('=');
+            if (eq_pos != std::string::npos) {
+                try {
+                    int64_t start_byte = std::stoll(range_val.substr(eq_pos + 1));
+                    engine.prioritize_range(hash, file_index, start_byte, 10 * 1024 * 1024);
+                } catch (...) {}
+            }
+        }
         
         auto files = engine.get_torrent_files(hash);
         if (file_index < 0 || file_index >= static_cast<int>(files.size())) {
@@ -534,7 +555,8 @@ void setup_engine_routes(httplib::Server& svr, torrent::Engine& engine) {
 
         res.set_content_provider(
             file_size, mime,
-            [fd_holder](size_t offset, size_t length, httplib::DataSink &sink) -> bool {
+            [fd_holder, &engine, hash, file_index](size_t offset, size_t length, httplib::DataSink &sink) -> bool {
+                engine.prioritize_range(hash, file_index, static_cast<int64_t>(offset), static_cast<int64_t>(std::max<size_t>(length, 10 * 1024 * 1024)));
                 int fd = *fd_holder;
                 const size_t CHUNK_SIZE = 256 * 1024;
                 std::vector<char> buffer(CHUNK_SIZE);
@@ -629,10 +651,23 @@ void setup_engine_routes(httplib::Server& svr, torrent::Engine& engine) {
                 {"path", f.path},
                 {"size", f.size},
                 {"progress", f.progress},
-                {"priority", f.priority}
+                {"priority", f.priority},
+                {"security_status", f.security_status},
+                {"threat_name", f.threat_name},
+                {"sha256", f.sha256},
+                {"is_risky_type", f.is_risky_type},
+                {"is_double_extension", f.is_double_extension},
+                {"security_details", f.security_details}
             });
         }
         res.set_content(response.dump(), "application/json");
+    });
+
+    svr.Post(R"(/api/torrents/([^/]+)/files/(\d+)/scan)", [&engine](const httplib::Request& req, httplib::Response& res) {
+        std::string info_hash = req.matches[1];
+        int file_index = std::stoi(req.matches[2]);
+        engine.scan_torrent_file_async(info_hash, file_index);
+        res.set_content(R"({"status":"scanning"})", "application/json");
     });
 
     svr.Post(R"(/api/torrents/([^/]+)/files)", [&engine](const httplib::Request& req, httplib::Response& res) {

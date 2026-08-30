@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { ShieldCheck, ShieldAlert, Shield } from 'lucide-react'
 
 export function Settings() {
   const [settings, setSettings] = useState<AppSettings | null>(null)
@@ -318,6 +319,70 @@ export function Settings() {
             ))}
           </ul>
         )}
+      </div>
+
+      {/* Malware & Threat Protection */}
+      <div className="glass-card bg-white/80 p-5 rounded-2xl border border-white shadow-2xs space-y-4">
+        <div className="flex items-center gap-2 border-b border-slate-200/70 pb-2">
+          <Shield className="text-blue-600" size={16} />
+          <h3 className="text-sm font-bold text-slate-900">Anti-Malware & Threat Protection</h3>
+        </div>
+
+        <div className="space-y-3">
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input 
+              type="checkbox"
+              checked={settings.enableMalwareProtection !== false}
+              onChange={(e) => {
+                const val = e.target.checked
+                debouncedSave({ enableMalwareProtection: val })
+              }}
+              className="mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+            />
+            <div className="flex-1">
+              <span className="font-semibold text-slate-700 block">Enable Real-Time Threat Scanning</span>
+              <span className="text-[11px] text-slate-500 block">
+                Screens incoming torrent metadata for malicious files and tags completed downloads with macOS Gatekeeper quarantine.
+              </span>
+            </div>
+          </label>
+
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input 
+              type="checkbox"
+              checked={!!settings.autoSkipRiskyFiles}
+              onChange={(e) => {
+                const val = e.target.checked
+                debouncedSave({ autoSkipRiskyFiles: val })
+              }}
+              className="mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+            />
+            <div className="flex-1">
+              <span className="font-semibold text-slate-700 block">Auto-Skip Risky Executable Files</span>
+              <span className="text-[11px] text-slate-500 block">
+                Automatically deselects scripts and binaries (.exe, .scr, .bat, .vbs, .ps1, etc.) upon torrent metadata arrival.
+              </span>
+            </div>
+          </label>
+
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input 
+              type="checkbox"
+              checked={settings.enableCloudLookup !== false}
+              onChange={(e) => {
+                const val = e.target.checked
+                debouncedSave({ enableCloudLookup: val })
+              }}
+              className="mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+            />
+            <div className="flex-1">
+              <span className="font-semibold text-slate-700 block">Cloud Threat Intelligence (MalwareBazaar)</span>
+              <span className="text-[11px] text-slate-500 block">
+                Checks cryptographic SHA-256 hashes against MalwareBazaar to detect confirmed malware payloads.
+              </span>
+            </div>
+          </label>
+        </div>
       </div>
       
       {saving && <p className="text-xs text-blue-600 font-semibold text-center animate-pulse">Saving changes...</p>}

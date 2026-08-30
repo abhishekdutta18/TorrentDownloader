@@ -54,6 +54,7 @@ public:
     void stop_all_torrents();
     void remove_torrent(const std::string& info_hash, bool delete_files = true);
     void prioritize_for_streaming(const std::string& info_hash, int file_index);
+    void prioritize_range(const std::string& info_hash, int file_index, std::int64_t byte_offset, std::int64_t byte_length = 10 * 1024 * 1024);
     void set_download_limit(int limit_kbps);
     void set_upload_limit(int limit_kbps);
     int get_download_limit() const;
@@ -93,9 +94,16 @@ public:
         long long size;
         float progress;
         int priority;
+        std::string security_status = "untested"; // "clean", "suspicious", "infected", "scanning", "untested"
+        std::string threat_name = "";
+        std::string sha256 = "";
+        bool is_risky_type = false;
+        bool is_double_extension = false;
+        std::string security_details = "";
     };
     std::vector<FileInfo> get_torrent_files(const std::string& info_hash) const;
     void prioritize_files(const std::string& info_hash, const std::vector<int>& priorities);
+    void scan_torrent_file_async(const std::string& info_hash, int file_index);
 
     struct PeerInfo {
         std::string ip;

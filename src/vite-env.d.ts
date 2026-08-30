@@ -13,6 +13,9 @@ interface AppSettings {
   mediaPlayerPath: string
   rssFeeds: string[]
   rssRules: string[]
+  enableMalwareProtection?: boolean
+  autoSkipRiskyFiles?: boolean
+  enableCloudLookup?: boolean
 }
 
 interface Window {
@@ -56,5 +59,6 @@ interface Window {
     searchTorrents: (query: string) => Promise<any>
     fetchRss: (url: string) => Promise<any>
     readClipboard: () => Promise<string>
+    scanFile?: (infoHash: string, fileIndex: number) => Promise<{ status: string }>
   }
 }

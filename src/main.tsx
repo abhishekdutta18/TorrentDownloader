@@ -199,7 +199,14 @@ window.torrentApi = {
               name: f.name,
               path: f.path,
               length: f.size,
-              progress: f.progress
+              progress: f.progress,
+              priority: f.priority,
+              securityStatus: f.security_status || 'untested',
+              threatName: f.threat_name || '',
+              sha256: f.sha256 || '',
+              isRiskyType: f.is_risky_type || false,
+              isDoubleExtension: f.is_double_extension || false,
+              securityDetails: f.security_details || ''
             }));
           }
           if (trackersRes.ok) {
@@ -376,5 +383,10 @@ window.torrentApi = {
       }
     } catch (_) {}
     return '';
+  },
+  scanFile: async (hash: string, fileIndex: number) => {
+    const res = await fetch(`${getBase()}/api/torrents/${hash}/files/${fileIndex}/scan`, { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to trigger scan');
+    return await res.json();
   }
 }

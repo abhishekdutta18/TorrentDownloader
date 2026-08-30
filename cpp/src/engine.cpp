@@ -1,4 +1,5 @@
 #include "engine.hpp"
+#include "security.hpp"
 #include <libtorrent/version.hpp>
 #include <libtorrent/torrent_info.hpp>
 #include <libtorrent/magnet_uri.hpp>
@@ -42,11 +43,35 @@ Engine::Engine() : session_(), running_(true) {
     pack.set_int(lt::settings_pack::active_downloads, 30);
     pack.set_int(lt::settings_pack::active_seeds, 30);
     pack.set_int(lt::settings_pack::active_limit, 60);
-    pack.set_int(lt::settings_pack::connections_limit, 500);
-    pack.set_int(lt::settings_pack::max_peerlist_size, 4000);
+    pack.set_int(lt::settings_pack::connections_limit, 600);
+    pack.set_int(lt::settings_pack::max_peerlist_size, 5000);
     pack.set_bool(lt::settings_pack::enable_dht, true);
     pack.set_str(lt::settings_pack::dht_bootstrap_nodes,
         "router.bittorrent.com:6881,dht.transmissionbt.com:6881,router.utorrent.com:6881,dht.libtorrent.org:25401");
+
+    // Apple Silicon NVMe SSD & Disk I/O Concurrency
+    pack.set_int(lt::settings_pack::aio_threads, 8);               // 8 async disk I/O workers for APFS NVMe
+    pack.set_int(lt::settings_pack::hashing_threads, 4);           // 4 dedicated SHA-1 hashing threads on M-series cores
+    pack.set_int(lt::settings_pack::disk_io_write_mode, lt::settings_pack::enable_os_cache);
+    pack.set_int(lt::settings_pack::disk_io_read_mode, lt::settings_pack::enable_os_cache);
+
+    // Cache line & buffer tuning (capped RAM & high throughput)
+    pack.set_int(lt::settings_pack::read_cache_line_size, 32);     // 32 * 16 KiB = 512 KiB read-ahead cache line
+    pack.set_int(lt::settings_pack::write_cache_line_size, 32);    // 512 KiB write cache line for fast APFS block writes
+    pack.set_int(lt::settings_pack::checking_mem_usage, 2048);     // 32 MB hash checking buffer
+
+    // High-Throughput Network Socket Buffers (2-3 MB)
+    pack.set_int(lt::settings_pack::send_buffer_watermark, 3 * 1024 * 1024);     // 3 MB
+    pack.set_int(lt::settings_pack::recv_socket_buffer_size, 2 * 1024 * 1024);   // 2 MB
+    pack.set_int(lt::settings_pack::send_socket_buffer_size, 2 * 1024 * 1024);   // 2 MB
+    pack.set_int(lt::settings_pack::max_peer_recv_buffer_size, 2 * 1024 * 1024);
+
+    // Transport Protocols & Speed Optimization
+    pack.set_bool(lt::settings_pack::enable_incoming_utp, true);
+    pack.set_bool(lt::settings_pack::enable_outgoing_utp, true);
+    pack.set_bool(lt::settings_pack::enable_incoming_tcp, true);
+    pack.set_bool(lt::settings_pack::enable_outgoing_tcp, true);
+    pack.set_int(lt::settings_pack::mixed_mode_algorithm, lt::settings_pack::prefer_tcp);
 
     session_.apply_settings(pack);
 
@@ -468,6 +493,19 @@ std::vector<Engine::FileInfo> Engine::get_torrent_files(const std::string& info_
                     fi.size = tf->files().file_size(lt::file_index_t(i));
                     fi.progress = fi.size > 0 ? static_cast<float>(progress[i]) / fi.size : 1.0f;
                     fi.priority = (i < priorities.size()) ? static_cast<uint8_t>(priorities[i]) : 1;
+
+                    auto sec = SecurityManager::instance().get_status(info_hash, i);
+                    if (sec.status == "untested" || sec.status.empty()) {
+                        sec = SecurityManager::instance().analyze_filename(fi.name);
+                        SecurityManager::instance().set_status(info_hash, i, sec);
+                    }
+                    fi.security_status = sec.status;
+                    fi.threat_name = sec.threat_name;
+                    fi.sha256 = sec.sha256;
+                    fi.is_risky_type = sec.is_risky_type;
+                    fi.is_double_extension = sec.is_double_extension;
+                    fi.security_details = sec.details;
+
                     files.push_back(fi);
                 }
             }
@@ -475,6 +513,21 @@ std::vector<Engine::FileInfo> Engine::get_torrent_files(const std::string& info_
         }
     }
     return files;
+}
+
+void Engine::scan_torrent_file_async(const std::string& info_hash, int file_index) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& handle : session_.get_torrents()) {
+        if (hash_to_string(handle.info_hashes()) == info_hash) {
+            if (auto tf = handle.torrent_file()) {
+                if (file_index >= 0 && file_index < tf->num_files()) {
+                    std::string full_path = handle.status().save_path + "/" + tf->files().file_path(lt::file_index_t(file_index));
+                    SecurityManager::instance().scan_file_async(info_hash, file_index, full_path, SecurityManager::instance().is_cloud_lookup_enabled());
+                }
+            }
+            break;
+        }
+    }
 }
 
 void Engine::prioritize_files(const std::string& info_hash, const std::vector<int>& priorities) {
@@ -730,10 +783,10 @@ void Engine::prioritize_for_streaming(const std::string& info_hash, int file_ind
             if (auto tinfo = t.torrent_file()) {
                 if (file_index < 0 || file_index >= tinfo->num_files()) return;
 
-                // Turn on sequential download
+                // Turn on sequential download for steady forward stream progress
                 t.set_flags(lt::torrent_flags::sequential_download, lt::torrent_flags::sequential_download);
                 
-                // Prioritize this file
+                // Prioritize this target file to maximum download priority
                 t.file_priority(lt::file_index_t{file_index}, lt::download_priority_t{7});
 
                 // Find piece boundaries for this file
@@ -746,17 +799,45 @@ void Engine::prioritize_for_streaming(const std::string& info_hash, int file_ind
                     int start_piece = static_cast<int>(file_offset / piece_len);
                     int end_piece = static_cast<int>((file_offset + file_size - 1) / piece_len);
 
-                    // Prioritize first 4 pieces with highest priority 7 (for file headers, moov atom, ebml)
-                    for (int p = start_piece; p <= std::min(end_piece, start_piece + 4); ++p) {
+                    // 1. Prioritize first 30 pieces with highest priority 7 & deadline 0 (headers, moov atom, codecs)
+                    for (int p = start_piece; p <= std::min(end_piece, start_piece + 30); ++p) {
                         t.piece_priority(lt::piece_index_t(p), lt::download_priority_t(7));
-                        t.set_piece_deadline(lt::piece_index_t(p), (p - start_piece + 1) * 200);
+                        t.set_piece_deadline(lt::piece_index_t(p), 0);
                     }
 
-                    // Prioritize last 4 pieces with high priority 7 (for seek index, moov atom if at end)
-                    for (int p = std::max(start_piece, end_piece - 4); p <= end_piece; ++p) {
+                    // 2. Prioritize last 20 pieces with highest priority 7 & deadline 0 (moov atom at EOF, MKV Cues/seek table)
+                    for (int p = std::max(start_piece, end_piece - 20); p <= end_piece; ++p) {
                         t.piece_priority(lt::piece_index_t(p), lt::download_priority_t(7));
-                        t.set_piece_deadline(lt::piece_index_t(p), 500);
+                        t.set_piece_deadline(lt::piece_index_t(p), 0);
                     }
+                }
+                return;
+            }
+        }
+    }
+}
+
+void Engine::prioritize_range(const std::string& info_hash, int file_index, std::int64_t byte_offset, std::int64_t byte_length) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto const& t : session_.get_torrents()) {
+        if (hash_to_string(t.info_hashes()) == info_hash) {
+            if (auto tinfo = t.torrent_file()) {
+                if (file_index < 0 || file_index >= tinfo->num_files()) return;
+                auto files = tinfo->files();
+                int64_t file_base = files.file_offset(lt::file_index_t(file_index));
+                int64_t file_size = files.file_size(lt::file_index_t(file_index));
+                int piece_len = tinfo->piece_length();
+                if (piece_len <= 0 || file_size <= 0) return;
+
+                int64_t target_start = file_base + std::max<int64_t>(0, byte_offset);
+                int64_t target_end = file_base + std::min<int64_t>(file_size - 1, byte_offset + byte_length);
+
+                int start_piece = static_cast<int>(target_start / piece_len);
+                int end_piece = static_cast<int>(target_end / piece_len);
+
+                for (int p = start_piece; p <= end_piece && p < tinfo->num_pieces(); ++p) {
+                    t.piece_priority(lt::piece_index_t(p), lt::download_priority_t(7));
+                    t.set_piece_deadline(lt::piece_index_t(p), 0);
                 }
                 return;
             }
@@ -809,11 +890,61 @@ void Engine::poll_alerts_loop() {
                     }
                 } catch (...) {}
             } else if (auto* mra = lt::alert_cast<lt::metadata_received_alert>(a)) {
-                std::cout << "[Alert] Metadata received for: " << hash_to_string(mra->handle.info_hashes()) << std::endl;
+                std::string ih = hash_to_string(mra->handle.info_hashes());
+                std::cout << "[Alert] Metadata received for: " << ih << std::endl;
                 mra->handle.save_resume_data(lt::torrent_handle::save_info_dict);
+
+                if (SecurityManager::instance().is_enabled()) {
+                    if (auto tf = mra->handle.torrent_file()) {
+                        std::vector<lt::download_priority_t> current_priorities = mra->handle.get_file_priorities();
+                        bool auto_skip = SecurityManager::instance().is_auto_skip_risky();
+                        bool modified_priorities = false;
+
+                        for (int i = 0; i < tf->num_files(); ++i) {
+                            std::string fname = std::string(tf->files().file_name(lt::file_index_t(i)));
+                            auto sec = SecurityManager::instance().analyze_filename(fname);
+                            SecurityManager::instance().set_status(ih, i, sec);
+
+                            if (auto_skip && sec.is_risky_type) {
+                                if (i < static_cast<int>(current_priorities.size())) {
+                                    current_priorities[i] = lt::dont_download;
+                                    modified_priorities = true;
+                                    std::cout << "[Security] Auto-skipping risky file: " << fname << std::endl;
+                                }
+                            }
+                        }
+                        if (modified_priorities) {
+                            mra->handle.prioritize_files(current_priorities);
+                        }
+                    }
+                }
+            } else if (auto* fca = lt::alert_cast<lt::file_completed_alert>(a)) {
+                std::string ih = hash_to_string(fca->handle.info_hashes());
+                int file_idx = static_cast<int>(fca->index);
+                std::cout << "[Alert] File completed: " << file_idx << " in " << ih << std::endl;
+                if (SecurityManager::instance().is_enabled()) {
+                    if (auto tf = fca->handle.torrent_file()) {
+                        std::string rel_path = tf->files().file_path(fca->index);
+                        std::string save_p = fca->handle.status().save_path;
+                        std::string full_p = save_p + "/" + rel_path;
+                        SecurityManager::instance().scan_file_async(ih, file_idx, full_p, SecurityManager::instance().is_cloud_lookup_enabled());
+                    }
+                }
             } else if (auto* tfa = lt::alert_cast<lt::torrent_finished_alert>(a)) {
-                std::cout << "[Alert] Torrent finished: " << hash_to_string(tfa->handle.info_hashes()) << std::endl;
+                std::string ih = hash_to_string(tfa->handle.info_hashes());
+                std::cout << "[Alert] Torrent finished: " << ih << std::endl;
                 tfa->handle.save_resume_data(lt::torrent_handle::save_info_dict);
+
+                if (SecurityManager::instance().is_enabled()) {
+                    if (auto tf = tfa->handle.torrent_file()) {
+                        std::string save_p = tfa->handle.status().save_path;
+                        for (int i = 0; i < tf->num_files(); ++i) {
+                            std::string rel_path = tf->files().file_path(lt::file_index_t(i));
+                            std::string full_p = save_p + "/" + rel_path;
+                            SecurityManager::instance().scan_file_async(ih, i, full_p, SecurityManager::instance().is_cloud_lookup_enabled());
+                        }
+                    }
+                }
             } else if (auto* ssa = lt::alert_cast<lt::session_stats_alert>(a)) {
                 static const int dht_nodes_idx = lt::find_metric_idx("dht.dht_nodes");
                 static const int dht_torrents_idx = lt::find_metric_idx("dht.dht_torrents");

@@ -4,7 +4,7 @@ import {
   Play, Pause, Plus, HardDrive, Settings, Activity, FolderOpen, 
   Copy, ArrowDown, ArrowUp, Trash2, MonitorPlay, Square, 
   Search, BarChart2, Check, Loader2, X, ExternalLink, Filter, Film, Layers,
-  TrendingUp, Wifi, Globe, ShieldCheck, Database, Zap
+  TrendingUp, Wifi, Globe, ShieldCheck, ShieldAlert, ShieldX, Shield, AlertTriangle, Database, Zap
 } from 'lucide-react'
 import './App.css'
 import { Settings as SettingsComponent } from './components/Settings'
@@ -19,6 +19,13 @@ interface TorrentFile {
   skipped: boolean
   pieceMap?: number[]
   path?: string
+  priority?: number
+  securityStatus?: 'clean' | 'suspicious' | 'infected' | 'scanning' | 'untested'
+  threatName?: string
+  sha256?: string
+  isRiskyType?: boolean
+  isDoubleExtension?: boolean
+  securityDetails?: string
 }
 
 interface Torrent {
@@ -94,6 +101,14 @@ function App() {
   // Side Panel Inspector State
   const [inspectorHash, setInspectorHash] = useState<string | null>(null)
   const [inspectorTab, setInspectorTab] = useState<'files' | 'peers' | 'trackers' | 'pieces'>('files')
+  const [securityModal, setSecurityModal] = useState<{
+    title: string
+    fileName: string
+    isMalware: boolean
+    threatName?: string
+    details?: string
+    onConfirm: () => void
+  } | null>(null)
   const [menuAnchor, setMenuAnchor] = useState<{
     hash: string
     top: number
@@ -294,8 +309,21 @@ function App() {
     return { index: 0, name: 'video.mp4' }
   }
 
+  const handleScanFile = async (hash: string, fileIndex: number) => {
+    try {
+      if (window.torrentApi?.scanFile) {
+        await window.torrentApi.scanFile(hash, fileIndex)
+      } else {
+        const base = (window.location.port === '5173' || window.location.port === '3000') ? 'http://localhost:8080' : ''
+        await fetch(`${base}/api/torrents/${hash}/files/${fileIndex}/scan`, { method: 'POST' })
+      }
+    } catch (e) {
+      console.warn('Failed to trigger scan:', e)
+    }
+  }
+
   // In-process OmniPlayer & In-App Video Streaming Launcher
-  const playInOmniPlayer = async (infoHash: string, fileIndex?: number, title?: string) => {
+  const playInOmniPlayer = async (infoHash: string, fileIndex?: number, title?: string, fileSecurity?: { status?: string, threatName?: string, isRisky?: boolean }) => {
     let targetIdx = fileIndex
     let targetName = ''
 
@@ -307,22 +335,49 @@ function App() {
       targetName = title || 'video.mp4'
     }
 
-    // Ensure targetName ends with a recognized media extension
-    if (!/\.[a-z0-9]{2,4}$/i.test(targetName)) {
-      targetName = targetName + '.mp4'
+    const startPlay = () => {
+      let safePlaybackName = targetName
+      if (!/\.[a-z0-9]{2,4}$/i.test(safePlaybackName)) {
+        safePlaybackName = safePlaybackName + '.mp4'
+      }
+
+      const base = (window.location.port === '5173' || window.location.port === '3000') ? 'http://localhost:8080' : ''
+      const safeTitle = encodeURIComponent(safePlaybackName)
+      const streamUrl = `${base}/api/stream/${infoHash}/${targetIdx}/${safeTitle}`
+
+      setPlayerModal({
+        streamUrl,
+        title: safePlaybackName,
+        infoHash,
+        fileIndex: targetIdx
+      })
     }
 
-    const base = (window.location.port === '5173' || window.location.port === '3000') ? 'http://localhost:8080' : ''
-    const safeTitle = encodeURIComponent(targetName)
-    const streamUrl = `${base}/api/stream/${infoHash}/${targetIdx}/${safeTitle}`
+    // Execution Guard: prompt confirmation before playing suspicious or malware-infected files
+    const targetTorrent = torrents.find(t => t.infoHash === infoHash)
+    const targetFile = targetTorrent?.files?.[targetIdx ?? 0]
+    const status = fileSecurity?.status || targetFile?.securityStatus
+    const isRisky = fileSecurity?.isRisky || targetFile?.isRiskyType || /\.(exe|scr|bat|cmd|ps1|vbs|msi|iso|dmg|pkg)$/i.test(targetName)
+    const isMalware = status === 'infected'
 
-    // 1. Launch in-app embedded video streaming overlay immediately!
-    setPlayerModal({
-      streamUrl,
-      title: targetName,
-      infoHash,
-      fileIndex: targetIdx
-    })
+    if (isMalware || isRisky) {
+      setSecurityModal({
+        title: isMalware ? 'Malware Threat Warning' : 'Suspicious Executable Warning',
+        fileName: targetName,
+        isMalware,
+        threatName: fileSecurity?.threatName || targetFile?.threatName,
+        details: isMalware 
+          ? `Threat intelligence identified "${fileSecurity?.threatName || targetFile?.threatName || 'Malicious payload'}" in this file.`
+          : 'This file is an executable or script. Opening or streaming executable files may execute code on your computer.',
+        onConfirm: () => {
+          setSecurityModal(null)
+          startPlay()
+        }
+      })
+      return
+    }
+
+    startPlay()
   }
 
   const openOmniPlayerStudio = () => {
@@ -1353,24 +1408,75 @@ function App() {
               {/* Tab: Files */}
               {inspectorTab === 'files' && (
                 <div className="space-y-2 text-xs max-h-72 overflow-y-auto custom-scroll pr-1">
+                  {currentInspectorTorrent.files?.some(f => f.securityStatus === 'infected') && (
+                    <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-[11px] font-semibold flex items-center gap-2">
+                      <ShieldX className="text-rose-600 shrink-0" size={16} />
+                      <span>Security Warning: Known malware detected in this torrent!</span>
+                    </div>
+                  )}
+                  {currentInspectorTorrent.files?.some(f => (f.isRiskyType || f.isDoubleExtension) && f.securityStatus !== 'infected') && (
+                    <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] flex items-center gap-2">
+                      <ShieldAlert className="text-amber-600 shrink-0" size={14} />
+                      <span>Executable files detected. Execution guard active.</span>
+                    </div>
+                  )}
+
                   {currentInspectorTorrent.files && currentInspectorTorrent.files.length > 0 ? (
                     currentInspectorTorrent.files.map((file, i) => (
                       <div key={i} className="p-2.5 rounded-xl bg-white border border-slate-200/80 flex flex-col gap-2 shadow-2xs">
                         <div className="flex items-center justify-between">
                           <div className="truncate mr-2 flex-1">
-                            <div className="font-bold text-slate-800 truncate" title={file.name}>
-                              {file.name}
+                            <div className="flex items-center gap-1.5 truncate">
+                              <span className="font-bold text-slate-800 truncate" title={file.name}>
+                                {file.name}
+                              </span>
+                              {/* Security Status Badge */}
+                              {file.securityStatus === 'infected' ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-200 shrink-0" title={file.threatName || 'Malware detected'}>
+                                  <ShieldX size={10} /> {file.threatName || 'Infected'}
+                                </span>
+                              ) : file.isDoubleExtension ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0" title="Deceptive double extension">
+                                  <ShieldAlert size={10} /> Double Ext
+                                </span>
+                              ) : file.isRiskyType ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0" title="Executable file">
+                                  <ShieldAlert size={10} /> Executable
+                                </span>
+                              ) : file.securityStatus === 'scanning' ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-blue-50 text-blue-700 border border-blue-200 shrink-0">
+                                  <Loader2 size={10} className="animate-spin" /> Scanning
+                                </span>
+                              ) : file.securityStatus === 'clean' ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0" title={file.securityDetails || 'Safe'}>
+                                  <ShieldCheck size={10} /> Clean
+                                </span>
+                              ) : null}
                             </div>
                             <div className="text-[10px] text-slate-500 font-mono">
                               {formatBytes(file.length)} • {(file.progress * 100).toFixed(0)}%
+                              {file.sha256 && (
+                                <span className="ml-2 text-[9px] text-slate-400 font-mono" title={file.sha256}>
+                                  SHA: {file.sha256.substring(0, 8)}...
+                                </span>
+                              )}
                             </div>
                           </div>
-                          <button 
-                            onClick={() => playInOmniPlayer(currentInspectorTorrent.infoHash, i, file.name)}
-                            className="glass-btn px-2.5 py-1 rounded-lg text-[10px] font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 shrink-0"
-                          >
-                            <Play size={10} className="fill-current" /> Stream
-                          </button>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button 
+                              onClick={() => handleScanFile(currentInspectorTorrent.infoHash, i)}
+                              title="Scan file for threats"
+                              className="glass-btn px-2 py-1 rounded-lg text-[10px] font-semibold text-slate-600 hover:text-blue-600 flex items-center gap-1"
+                            >
+                              <Shield size={10} /> Scan
+                            </button>
+                            <button 
+                              onClick={() => playInOmniPlayer(currentInspectorTorrent.infoHash, i, file.name, { status: file.securityStatus, threatName: file.threatName, isRisky: file.isRiskyType })}
+                              className="glass-btn px-2.5 py-1 rounded-lg text-[10px] font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
+                            >
+                              <Play size={10} className="fill-current" /> Stream
+                            </button>
+                          </div>
                         </div>
                         <div className="flex items-center gap-1 text-[10px] font-semibold text-slate-500 pt-1 border-t border-slate-100">
                           <span className="text-slate-400 mr-1">Priority:</span>
@@ -1715,6 +1821,48 @@ function App() {
                 className="glass-btn px-3 py-1 rounded-lg text-xs font-semibold text-slate-600"
               >
                 Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Execution Guard Security Modal */}
+      {securityModal && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="glass-card bg-white p-6 rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3">
+              <div className={`p-2.5 rounded-xl ${securityModal.isMalware ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'}`}>
+                {securityModal.isMalware ? <ShieldX size={24} /> : <AlertTriangle size={24} />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-bold text-slate-900">{securityModal.title}</h3>
+                <p className="text-xs text-slate-500 font-mono truncate" title={securityModal.fileName}>
+                  {securityModal.fileName}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-100">
+              {securityModal.details}
+            </p>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                onClick={() => setSecurityModal(null)}
+                className="glass-btn px-4 py-2 rounded-xl font-bold text-xs text-slate-700 hover:text-slate-900"
+              >
+                Cancel (Safe)
+              </button>
+              <button
+                onClick={securityModal.onConfirm}
+                className={`px-4 py-2 rounded-xl font-bold text-xs text-white shadow-sm transition-colors ${
+                  securityModal.isMalware 
+                    ? 'bg-rose-600 hover:bg-rose-700' 
+                    : 'bg-amber-600 hover:bg-amber-700'
+                }`}
+              >
+                Proceed Anyway
               </button>
             </div>
           </div>
