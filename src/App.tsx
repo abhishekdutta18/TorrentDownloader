@@ -687,9 +687,7 @@ function App() {
         
         {/* Left Section: Offset for macOS Native Traffic Lights + Brand */}
         <div className="flex items-center gap-2.5 ml-20 [-webkit-app-region:no-drag]">
-          <div className="w-5 h-5 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-xs">
-            <Play className="w-2.5 h-2.5 text-white fill-white ml-0.5" />
-          </div>
+          <img src="/logo.png" alt="OmniFlux" className="w-5 h-5 rounded-md object-contain shadow-xs" />
           <span className="text-xs font-extrabold tracking-tight text-slate-800">
             OmniFlux
           </span>
