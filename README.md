@@ -209,6 +209,46 @@ OmniFlux's embedded C++ backend exposes a high-performance HTTP REST API on `htt
 | `GET` | `/api/settings` | Retrieve global bandwidth limits, download directory, and security toggles. |
 | `POST` | `/api/settings` | Update global settings (`~/.fluxtorrent/settings.json`). |
 
+### Local AI & Media Intelligence
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `POST` | `/api/ai/parse_media` | Parse raw scene release strings into title, year, season, episode, quality, codec, and clean Plex filenames. |
+| `GET` | `/api/torrents/:hash/media_ai` | Run AI scene detection and auto-renaming suggestions on all files in a torrent. |
+
+---
+
+## 🤖 *Arr Automation Integration (Sonarr, Radarr, Prowlarr)
+
+OmniFlux exposes an embedded **qBittorrent Web API v2** compatibility layer (`/api/v2/*`). This allows popular media automation services (**Sonarr**, **Radarr**, **Prowlarr**, **Overseerr**) to treat OmniFlux as a native qBittorrent client with zero extra bridges or wrappers!
+
+### Setup in Sonarr / Radarr:
+1. Open **Settings** > **Download Clients** > **Add (+)**.
+2. Select **qBittorrent**.
+3. Configure the connection:
+   - **Host**: `localhost` (or your Mac's LAN IP if running in Docker/VM)
+   - **Port**: `8080`
+   - **Username**: `admin`
+   - **Password**: `adminadmin` (or any string)
+   - **Use SSL**: Disabled
+4. Click **Test** — Sonarr/Radarr will handshake with `GET /api/v2/app/webapiVersion` and authenticate via `POST /api/v2/auth/login`.
+5. Save. Downloads and queue monitoring will now synchronize seamlessly!
+
+### Supported qBittorrent v2 Endpoints:
+| Method | Endpoint | Purpose |
+| :--- | :--- | :--- |
+| `GET` | `/api/v2/app/version` | Handshake application version string (`v4.6.0`). |
+| `GET` | `/api/v2/app/webapiVersion` | Handshake Web API version (`2.9.3`). |
+| `POST` | `/api/v2/auth/login` | Session handshake returning `SID` cookie. |
+| `POST` | `/api/v2/auth/logout` | Invalidate session cookie. |
+| `GET` | `/api/v2/transfer/info` | Global download/upload rates and connection status. |
+| `GET` | `/api/v2/torrents/info?filter=all` | Queue monitoring with torrent progress, state, speeds, and sizes. |
+| `POST` | `/api/v2/torrents/add` | Enqueue torrent via magnet URLs or multipart torrent files. |
+| `POST` | `/api/v2/torrents/pause` | Pause torrents by pipe-separated hash (`hashes=hash1\|hash2`) or `all`. |
+| `POST` | `/api/v2/torrents/resume` | Resume torrents by hash or `all`. |
+| `POST` | `/api/v2/torrents/delete` | Delete torrent with optional disk data removal (`deleteFiles=true`). |
+| `GET` | `/api/v2/torrents/files?hash={hash}` | Torrent file list with byte progress and priority levels. |
+| `GET` | `/api/v2/torrents/trackers?hash={hash}` | Swarm announce URLs and peer metrics. |
+
 ---
 
 ## 📬 Postman API Collection & Testing
