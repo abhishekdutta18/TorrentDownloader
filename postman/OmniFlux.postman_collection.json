@@ -1,0 +1,1356 @@
+{
+  "info": {
+    "_postman_id": "omniflux-rest-api-v1",
+    "name": "OmniFlux REST API",
+    "description": "Comprehensive Postman collection for OmniFlux — the native C++17 libtorrent and Swift BitTorrent client for macOS. Covers torrent lifecycle management, HTTP 206 byte-range streaming, file priority control, session swarm statistics, Jackett/DHT search, and real-time MalwareBazaar threat scanning.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Torrents",
+      "description": "Endpoints to add, inspect, manage download state, pause, resume, stop, and delete torrents.",
+      "item": [
+        {
+          "name": "List Active Torrents",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response is an array\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(Array.isArray(jsonData)).to.be.true;",
+                  "    if (jsonData.length > 0) {",
+                  "        pm.expect(jsonData[0]).to.have.property('hash');",
+                  "        pm.expect(jsonData[0]).to.have.property('name');",
+                  "        pm.expect(jsonData[0]).to.have.property('progress');",
+                  "        pm.expect(jsonData[0]).to.have.property('download_speed');",
+                  "        pm.expect(jsonData[0]).to.have.property('upload_speed');",
+                  "        pm.expect(jsonData[0]).to.have.property('state');",
+                  "        // Set first torrent hash in environment for downstream requests",
+                  "        if (jsonData[0].hash) {",
+                  "            pm.environment.set(\"torrentHash\", jsonData[0].hash);",
+                  "        }",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents"
+              ]
+            },
+            "description": "Retrieves all active torrents with their progress, transfer speeds, peer counts, file lists, ETA, and download paths."
+          },
+          "response": []
+        },
+        {
+          "name": "Add Torrent (Magnet or URL)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 409 (if already active)\", function () {",
+                  "    pm.expect([200, 409]).to.include(pm.response.code);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test(\"Torrent added successfully with info hash\", function () {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('status', 'success');",
+                  "        pm.expect(jsonData).to.have.property('hash');",
+                  "        if (jsonData.hash) {",
+                  "            pm.environment.set(\"torrentHash\", jsonData.hash);",
+                  "        }",
+                  "    });",
+                  "} else if (pm.response.code === 409) {",
+                  "    pm.test(\"Duplicate torrent detected properly\", function () {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('status', 'error');",
+                  "        pm.expect(jsonData).to.have.property('message', 'Torrent already exists');",
+                  "    });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"magnet\": \"{{sampleMagnet}}\",\n  \"name\": \"Big Buck Bunny Test\",\n  \"save_path\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents"
+              ]
+            },
+            "description": "Adds a new torrent from a magnet URI, HTTP torrent file link, or local file path."
+          },
+          "response": []
+        },
+        {
+          "name": "Upload Torrent File",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 400 (if file payload omitted)\", function () {",
+                  "    pm.expect([200, 400]).to.include(pm.response.code);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test(\"File uploaded and torrent registered\", function () {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('status', 'success');",
+                  "        pm.expect(jsonData).to.have.property('hash');",
+                  "        if (jsonData.hash) {",
+                  "            pm.environment.set(\"torrentHash\", jsonData.hash);",
+                  "        }",
+                  "    });",
+                  "} else {",
+                  "    pm.test(\"Handled missing file payload gracefully\", function () {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('status', 'error');",
+                  "    });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "The .torrent file binary to upload."
+                },
+                {
+                  "key": "save_path",
+                  "value": "",
+                  "type": "text",
+                  "description": "Optional custom download directory path."
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/file",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "file"
+              ]
+            },
+            "description": "Uploads and parses a raw `.torrent` file payload."
+          },
+          "response": []
+        },
+        {
+          "name": "Pause Torrent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Status indicates paused\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status', 'paused');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/pause",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "pause"
+              ]
+            },
+            "description": "Pauses download and upload transfers for a specific torrent."
+          },
+          "response": []
+        },
+        {
+          "name": "Resume Torrent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Status indicates resumed\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status', 'resumed');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/resume",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "resume"
+              ]
+            },
+            "description": "Resumes an active or paused torrent."
+          },
+          "response": []
+        },
+        {
+          "name": "Stop Torrent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Status indicates stopped\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status', 'stopped');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/stop",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "stop"
+              ]
+            },
+            "description": "Stops torrent transfers without removing the torrent from session state."
+          },
+          "response": []
+        },
+        {
+          "name": "Pause All Torrents",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"All torrents paused\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status', 'all_paused');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/pause_all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "pause_all"
+              ]
+            },
+            "description": "Batch pauses all active torrent downloads in the session."
+          },
+          "response": []
+        },
+        {
+          "name": "Resume All Torrents",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"All torrents resumed\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status', 'all_resumed');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/resume_all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "resume_all"
+              ]
+            },
+            "description": "Batch resumes all torrents across the session."
+          },
+          "response": []
+        },
+        {
+          "name": "Stop All Torrents",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"All torrents stopped\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status', 'all_stopped');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/stop_all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "stop_all"
+              ]
+            },
+            "description": "Batch stops all active torrent transfers."
+          },
+          "response": []
+        },
+        {
+          "name": "Toggle Sequential Download",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Sequential setting updated\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status', 'success');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sequential\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/sequential",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "sequential"
+              ]
+            },
+            "description": "Enables or disables sequential piece downloading for in-order media streaming."
+          },
+          "response": []
+        },
+        {
+          "name": "Open Torrent Folder in Finder",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Folder opened successfully\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status', 'success');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/open_folder",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "open_folder"
+              ]
+            },
+            "description": "Triggers macOS Finder (`open -R`) to reveal the torrent download folder or file."
+          },
+          "response": []
+        },
+        {
+          "name": "Remove Torrent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Torrent removed\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status', 'removed');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}?delete_files=false",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}"
+              ],
+              "query": [
+                {
+                  "key": "delete_files",
+                  "value": "false",
+                  "description": "Set to true to also delete downloaded files on disk."
+                }
+              ]
+            },
+            "description": "Removes the torrent from libtorrent session with optional deletion of downloaded files from disk."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Files & Media Streaming",
+      "description": "Endpoints to inspect individual files, change priority levels, trigger threat intelligence scans, and stream video content.",
+      "item": [
+        {
+          "name": "List Torrent Files & Security Info",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Files payload contains security metadata\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(Array.isArray(jsonData)).to.be.true;",
+                  "    if (jsonData.length > 0) {",
+                  "        pm.expect(jsonData[0]).to.have.property('index');",
+                  "        pm.expect(jsonData[0]).to.have.property('name');",
+                  "        pm.expect(jsonData[0]).to.have.property('path');",
+                  "        pm.expect(jsonData[0]).to.have.property('size');",
+                  "        pm.expect(jsonData[0]).to.have.property('priority');",
+                  "        pm.expect(jsonData[0]).to.have.property('security_status');",
+                  "        pm.expect(jsonData[0]).to.have.property('sha256');",
+                  "        pm.expect(jsonData[0]).to.have.property('is_risky_type');",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/files",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "files"
+              ]
+            },
+            "description": "Retrieves the list of files in a multi-file torrent along with their download priority, byte progress, SHA-256 hash, and MalwareBazaar security rating."
+          },
+          "response": []
+        },
+        {
+          "name": "Set File Priorities",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Priorities successfully set\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status', 'success');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priorities\": [1, 0, 7]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/files",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "files"
+              ]
+            },
+            "description": "Sets file download priorities (0 = Don't Download/Skip, 1 = Normal, 7 = High Priority)."
+          },
+          "response": []
+        },
+        {
+          "name": "Trigger Async File Malware Scan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Scan queued asynchronously\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status', 'scanning');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/files/{{fileIndex}}/scan",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "files",
+                "{{fileIndex}}",
+                "scan"
+              ]
+            },
+            "description": "Asynchronously calculates the SHA-256 hash for a specific file and verifies reputation against MalwareBazaar."
+          },
+          "response": []
+        },
+        {
+          "name": "Launch File in External Player",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"External player opened\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status', 'success');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/files/{{fileIndex}}/play_external",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "files",
+                "{{fileIndex}}",
+                "play_external"
+              ]
+            },
+            "description": "Opens the specified file in the system default media player (e.g. QuickTime, VLC, IINA)."
+          },
+          "response": []
+        },
+        {
+          "name": "HTTP 206 Partial Content Stream",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Streaming endpoint responds\", function () {",
+                  "    // 200 (Full), 206 (Partial), 503 (Buffering from swarm), or 404 (File index not found)",
+                  "    pm.expect([200, 206, 503, 404]).to.include(pm.response.code);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200 || pm.response.code === 206) {",
+                  "    pm.test(\"Accept-Ranges header present\", function () {",
+                  "        pm.expect(pm.response.headers.get('Accept-Ranges')).to.eql('bytes');",
+                  "    });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Range",
+                "value": "bytes=0-1048575",
+                "description": "Optional HTTP Range request to seek within the media stream."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/stream/{{torrentHash}}/{{fileIndex}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "stream",
+                "{{torrentHash}}",
+                "{{fileIndex}}"
+              ]
+            },
+            "description": "High-throughput sequential HTTP streaming endpoint with chunked byte-range support for video and audio playback."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Network & Swarm",
+      "description": "Endpoints to inspect session statistics, piece bitfields, connected peers, and manage trackers.",
+      "item": [
+        {
+          "name": "Get Session Statistics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Session stats structure is valid\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('dht_nodes');",
+                  "    pm.expect(jsonData).to.have.property('num_peers');",
+                  "    pm.expect(jsonData).to.have.property('download_rate');",
+                  "    pm.expect(jsonData).to.have.property('upload_rate');",
+                  "    pm.expect(jsonData).to.have.property('listen_port');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/session/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "session",
+                "stats"
+              ]
+            },
+            "description": "Returns real-time session statistics: DHT routing nodes, global peer connections, total bandwidth rates, and disk queue lengths."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Piece Bitfield & Availability",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Piece info returned\", function () {",
+                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "    if (pm.response.code === 200) {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('num_pieces');",
+                  "        pm.expect(jsonData).to.have.property('piece_length');",
+                  "        pm.expect(jsonData).to.have.property('bitfield');",
+                  "        pm.expect(jsonData).to.have.property('availability');",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/pieces",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "pieces"
+              ]
+            },
+            "description": "Provides piece-level bitfields and swarm piece availability counts for advanced piece map visualizations."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Connected Peers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Peers is an array\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(Array.isArray(jsonData)).to.be.true;",
+                  "    if (jsonData.length > 0) {",
+                  "        pm.expect(jsonData[0]).to.have.property('ip');",
+                  "        pm.expect(jsonData[0]).to.have.property('client');",
+                  "        pm.expect(jsonData[0]).to.have.property('down_speed');",
+                  "        pm.expect(jsonData[0]).to.have.property('up_speed');",
+                  "        pm.expect(jsonData[0]).to.have.property('progress');",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/peers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "peers"
+              ]
+            },
+            "description": "Lists all connected swarm peers, IP addresses, client identifiers, transfer speeds, and progress."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Trackers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Trackers list is an array\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(Array.isArray(jsonData)).to.be.true;",
+                  "    if (jsonData.length > 0) {",
+                  "        pm.expect(jsonData[0]).to.have.property('url');",
+                  "        pm.expect(jsonData[0]).to.have.property('status');",
+                  "        pm.expect(jsonData[0]).to.have.property('peers');",
+                  "        pm.expect(jsonData[0]).to.have.property('seeds');",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/trackers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "trackers"
+              ]
+            },
+            "description": "Lists all announce trackers registered for a specific torrent with seeder/peer discovery counts and response statuses."
+          },
+          "response": []
+        },
+        {
+          "name": "Add Tracker",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Tracker added\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status', 'success');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"udp://tracker.opentrackr.org:1337/announce\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/trackers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "trackers"
+              ]
+            },
+            "description": "Adds a new tracker announce URL to the torrent swarm."
+          },
+          "response": []
+        },
+        {
+          "name": "Force Tracker Reannounce",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Reannounce triggered\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status', 'success');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/reannounce",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "reannounce"
+              ]
+            },
+            "description": "Forces an immediate reannounce to all registered trackers and DHT."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Search & Aggregation",
+      "description": "Endpoints to execute real-time multi-indexer searches using Server-Sent Events (SSE).",
+      "item": [
+        {
+          "name": "Search Jackett & DHT (SSE Stream)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"SSE content type received\", function () {",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('text/event-stream');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/search?q={{searchQuery}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "{{searchQuery}}",
+                  "description": "Search keyword or phrase."
+                }
+              ]
+            },
+            "description": "Performs concurrent multi-provider search across Jackett and DHT, streaming results back via Server-Sent Events (SSE)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Settings & Preferences",
+      "description": "Endpoints to inspect and update bandwidth limits, download paths, RSS rules, and anti-malware security configurations.",
+      "item": [
+        {
+          "name": "Get Client Settings",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Settings schema is valid\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('downloadLimit');",
+                  "    pm.expect(jsonData).to.have.property('uploadLimit');",
+                  "    pm.expect(jsonData).to.have.property('enableMalwareProtection');",
+                  "    pm.expect(jsonData).to.have.property('autoSkipRiskyFiles');",
+                  "    pm.expect(jsonData).to.have.property('enableCloudLookup');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "settings"
+              ]
+            },
+            "description": "Retrieves global download/upload rate limits, RSS subscriptions, and MalwareBazaar defense settings."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Client Settings",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Settings updated successfully\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('downloadLimit');",
+                  "    pm.expect(jsonData).to.have.property('uploadLimit');",
+                  "    pm.expect(jsonData).to.have.property('enableMalwareProtection', true);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"downloadLimit\": 10485760,\n  \"uploadLimit\": 5242880,\n  \"enableMalwareProtection\": true,\n  \"autoSkipRiskyFiles\": true,\n  \"enableCloudLookup\": true,\n  \"rssFeeds\": [],\n  \"rssRules\": []\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "settings"
+              ]
+            },
+            "description": "Updates client configuration and writes settings to `~/.fluxtorrent/settings.json`."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "exec": [
+          "// Set default base URL if not defined in environment",
+          "if (!pm.environment.get(\"baseUrl\")) {",
+          "    pm.environment.set(\"baseUrl\", \"http://localhost:8080\");",
+          "}"
+        ],
+        "type": "text/javascript"
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "torrentHash",
+      "value": "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c",
+      "type": "string"
+    },
+    {
+      "key": "fileIndex",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "sampleMagnet",
+      "value": "magnet:?xt=urn:btih:dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c&dn=Big+Buck+Bunny",
+      "type": "string"
+    },
+    {
+      "key": "searchQuery",
+      "value": "ubuntu",
+      "type": "string"
+    }
+  ]
+}

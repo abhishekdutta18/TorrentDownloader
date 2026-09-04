@@ -12,8 +12,9 @@
 [![Engine](https://img.shields.io/badge/Engine-libtorrent--rasterbar%202.x-blue?logo=c%2B%2B)](https://libtorrent.org/)
 [![UI](https://img.shields.io/badge/UI-React%2018%20%7C%20Vite%208%20%7C%20Tailwind-61DAFB?logo=react)](https://react.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Postman](https://img.shields.io/badge/Postman-API%20Docs%20%26%20Tests-FF6C37?logo=postman&logoColor=white)](postman/OmniFlux.postman_collection.json)
 
-[Features](#-key-features) • [Architecture](#-architecture) • [Installation](#-installation) • [Build from Source](#-building-from-source) • [Security](#-integrated-security--threat-protection) • [API](#-rest-api-reference)
+[Features](#-key-features) • [Architecture](#-architecture) • [Installation](#-installation) • [Build from Source](#-building-from-source) • [Security](#-integrated-security--threat-protection) • [API & Postman](#-rest-api-reference)
 
 </div>
 
@@ -157,29 +158,89 @@ OmniFlux maintains automated CI and validation tests across both the C++ backend
 | :--- | :--- | :--- |
 | **C++ Engine Tests** | `npm run test:cpp` | Engine initialization, magnet parsing, torrent file loading, pause/resume, thread safety, multi-source search parsing, security extension detection, and SHA-256 calculations. |
 | **UI & Type Validation** | `npm test` | TypeScript type-checking (`tsc --noEmit`), JSX string literal newline verification, and Vite production bundle compilation. |
+| **API Integration Tests** | `npm run test:api` | Automated end-to-end REST API assertions via **Newman** against the Postman collection suite. |
 | **Code Linting** | `npm run lint` | ESLint rules for React Hooks and React Refresh. |
 
 ---
 
 ## 🔌 REST API Reference
 
-OmniFlux's embedded C++ backend exposes a lightweight HTTP REST API on `http://localhost:8080`:
+OmniFlux's embedded C++ backend exposes a high-performance HTTP REST API on `http://localhost:8080`:
 
+### Torrent Management
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `GET` | `/api/torrents` | List all active torrents with download/upload rates, progress, peers, and file lists. |
-| `POST` | `/api/torrents/add` | Add a torrent from magnet link, raw info hash, or base64 file data. |
-| `POST` | `/api/torrents/pause` | Pause an active torrent. |
-| `POST` | `/api/torrents/resume` | Resume a paused torrent. |
-| `POST` | `/api/torrents/remove` | Remove a torrent (optionally deleting downloaded files). |
-| `POST` | `/api/torrents/sequential` | Toggle sequential downloading for high-speed streaming. |
-| `POST` | `/api/torrents/file-priority` | Prioritize or skip individual files within a torrent. |
-| `GET` | `/api/settings` | Retrieve client settings (limits, download paths, security toggles). |
-| `POST` | `/api/settings` | Update client settings. |
-| `GET` | `/api/search?q={query}` | Perform real-time multi-provider torrent search. |
-| `GET` | `/api/rss/fetch` | Fetch RSS feed items and auto-queue matching rules. |
-| `GET` | `/api/security/scan?hash={hash}` | Trigger an immediate MalwareBazaar lookup for a torrent info hash. |
-| `GET` | `/stream/:hash/:index` | Byte-range HTTP stream endpoint for media players. |
+| `GET` | `/api/torrents` | List all active torrents with download/upload rates, progress, peers, and file metadata. |
+| `POST` | `/api/torrents` | Add a torrent from magnet link, raw info hash, or HTTP URL (`{"magnet": "..."}`). |
+| `POST` | `/api/torrents/file` | Upload and parse a `.torrent` file payload via `multipart/form-data`. |
+| `POST` | `/api/torrents/:hash/pause` | Pause download and upload for a specific torrent. |
+| `POST` | `/api/torrents/:hash/resume` | Resume a paused torrent. |
+| `POST` | `/api/torrents/:hash/stop` | Stop transfers without removing from session. |
+| `POST` | `/api/torrents/pause_all` | Batch pause all active torrents. |
+| `POST` | `/api/torrents/resume_all` | Batch resume all torrents. |
+| `POST` | `/api/torrents/stop_all` | Batch stop all active torrents. |
+| `POST` | `/api/torrents/:hash/sequential` | Toggle sequential piece downloading for media streaming (`{"sequential": true}`). |
+| `POST` | `/api/torrents/:hash/open_folder` | Reveal download folder in macOS Finder (`open -R`). |
+| `DELETE` | `/api/torrents/:hash?delete_files={bool}` | Remove torrent with optional file deletion from disk. |
+
+### Files, Security & Streaming
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/torrents/:hash/files` | List individual files, byte progress, priorities, SHA-256, and MalwareBazaar ratings. |
+| `POST` | `/api/torrents/:hash/files` | Set file priorities: `0` (skip), `1` (normal), `7` (high) (`{"priorities": [...]}`). |
+| `POST` | `/api/torrents/:hash/files/:index/scan` | Trigger asynchronous SHA-256 calculation and MalwareBazaar reputation lookup. |
+| `POST` | `/api/torrents/:hash/files/:index/play_external` | Launch file directly in system default media player. |
+| `GET` | `/api/stream/:hash/:index` | HTTP 206 Partial Content byte-range streaming for video and audio playback. |
+
+### Swarm, Trackers & Diagnostics
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/session/stats` | Real-time session statistics (DHT nodes, global transfer rates, peer counts, disk queues). |
+| `GET` | `/api/torrents/:hash/pieces` | Piece bitfield map and swarm piece availability. |
+| `GET` | `/api/torrents/:hash/peers` | Connected swarm peers with IP, client identification, and transfer rates. |
+| `GET` | `/api/torrents/:hash/trackers` | List registered trackers with seeder/leecher counts and announce statuses. |
+| `POST` | `/api/torrents/:hash/trackers` | Add a new announce tracker URL to the swarm (`{"url": "..."}`). |
+| `POST` | `/api/torrents/:hash/reannounce` | Force immediate tracker reannounce. |
+
+### Search & Settings
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/search?q={query}` | Perform concurrent Jackett & DHT search with Server-Sent Events (SSE) streaming. |
+| `GET` | `/api/settings` | Retrieve global bandwidth limits, download directory, and security toggles. |
+| `POST` | `/api/settings` | Update global settings (`~/.fluxtorrent/settings.json`). |
+
+---
+
+## 📬 Postman API Collection & Testing
+
+A complete Postman workspace is included in the [`postman/`](postman/) directory:
+
+* **Collection**: [`postman/OmniFlux.postman_collection.json`](postman/OmniFlux.postman_collection.json) (Postman v2.1.0 specification with 100% endpoint coverage, pre-request scripts, and JavaScript test assertions).
+* **Environment**: [`postman/OmniFlux_Local.postman_environment.json`](postman/OmniFlux_Local.postman_environment.json) (Pre-configured local variables).
+
+### 🚀 Quickstart with Postman
+
+1. Open the **Postman** desktop application or web workspace.
+2. Click **Import** and select:
+   * `postman/OmniFlux.postman_collection.json`
+   * `postman/OmniFlux_Local.postman_environment.json`
+3. Select the **OmniFlux Local Environment** in the top-right environment selector.
+4. Start your local OmniFlux backend or daemon (`./build/OmniFluxServer` or `npm run dev`).
+5. Execute requests interactively or click **Run collection** to run the complete test suite.
+
+### 🤖 Headless CLI Testing with Newman
+
+You can run automated integration and regression test suites from the command line or CI without opening Postman:
+
+```bash
+# Run tests against local daemon
+npm run test:api
+
+# Or run Newman directly with custom parameters
+npx newman run postman/OmniFlux.postman_collection.json \
+  -e postman/OmniFlux_Local.postman_environment.json \
+  --reporters cli
+```
 
 ---
 
