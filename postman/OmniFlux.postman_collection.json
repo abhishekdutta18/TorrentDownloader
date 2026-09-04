@@ -1310,6 +1310,119 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "Local AI & Media Intelligence",
+      "description": "Embedded Local AI engine endpoints to parse cryptic scene release titles, extract media parameters, and generate clean standardized filenames.",
+      "item": [
+        {
+          "name": "Parse Scene Release (Local AI)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Metadata correctly parsed by Local AI\", function () {",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.status).to.eql(\"success\");",
+                  "    pm.expect(data.metadata.media_type).to.eql(\"tv\");",
+                  "    pm.expect(data.metadata.clean_title).to.eql(\"Breaking Bad\");",
+                  "    pm.expect(data.metadata.season).to.eql(5);",
+                  "    pm.expect(data.metadata.episode).to.eql(14);",
+                  "    pm.expect(data.metadata.resolution).to.eql(\"1080p\");",
+                  "    pm.expect(data.metadata.video_codec).to.eql(\"x264\");",
+                  "    pm.expect(data.metadata.suggested_filename).to.include(\"Breaking Bad - S05E14\");",
+                  "    pm.expect(data.metadata.plex_relative_path).to.include(\"TV Shows/Breaking Bad\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Breaking.Bad.S05E14.1080p.BluRay.x264-ROVERS.mkv\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/ai/parse_media",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "ai",
+                "parse_media"
+              ]
+            },
+            "description": "Passes a raw scene release filename or torrent title through the embedded Local AI parser to extract title, season, episode, year, codec, and suggested Plex filename."
+          },
+          "response": []
+        },
+        {
+          "name": "Analyze Torrent Files with Local AI",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 404\", function () {",
+                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test(\"Torrent media intelligence payload valid\", function () {",
+                  "        var data = pm.response.json();",
+                  "        pm.expect(data.status).to.eql(\"success\");",
+                  "        pm.expect(data).to.have.property('torrent_metadata');",
+                  "        pm.expect(data).to.have.property('files');",
+                  "    });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/media_ai",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "media_ai"
+              ]
+            },
+            "description": "Runs Local AI intelligence on a specific torrent and all contained media files, generating clean suggestions for library organization."
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "event": [

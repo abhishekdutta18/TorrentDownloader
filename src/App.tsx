@@ -4,7 +4,7 @@ import {
   Play, Pause, Plus, HardDrive, Settings, Activity, FolderOpen, 
   Copy, ArrowDown, ArrowUp, Trash2, MonitorPlay, Square, 
   Search, BarChart2, Check, Loader2, X, ExternalLink, Filter, Film, Layers,
-  TrendingUp, Wifi, Globe, ShieldCheck, ShieldAlert, ShieldX, Shield, AlertTriangle, Database, Zap
+  TrendingUp, Wifi, Globe, ShieldCheck, ShieldAlert, ShieldX, Shield, AlertTriangle, Database, Zap, Sparkles
 } from 'lucide-react'
 import './App.css'
 import { Settings as SettingsComponent } from './components/Settings'
@@ -100,7 +100,10 @@ function App() {
   
   // Side Panel Inspector State
   const [inspectorHash, setInspectorHash] = useState<string | null>(null)
-  const [inspectorTab, setInspectorTab] = useState<'files' | 'peers' | 'trackers' | 'pieces'>('files')
+  const [inspectorTab, setInspectorTab] = useState<'files' | 'peers' | 'trackers' | 'pieces' | 'ai'>('files')
+  const [mediaAIData, setMediaAIData] = useState<any>(null)
+  const [loadingAI, setLoadingAI] = useState(false)
+  const [copiedAIFilename, setCopiedAIFilename] = useState(false)
   const [securityModal, setSecurityModal] = useState<{
     title: string
     fileName: string
@@ -156,6 +159,21 @@ function App() {
   useEffect(() => {
     inspectorHashRef.current = inspectorHash
   }, [inspectorHash])
+
+  useEffect(() => {
+    if (inspectorTab === 'ai' && inspectorHash) {
+      setLoadingAI(true)
+      fetch(`http://localhost:8080/api/torrents/${inspectorHash}/media_ai`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.status === 'success') {
+            setMediaAIData(data)
+          }
+        })
+        .catch(() => {})
+        .finally(() => setLoadingAI(false))
+    }
+  }, [inspectorTab, inspectorHash])
 
   useEffect(() => {
     if (!menuAnchor) return
@@ -1401,6 +1419,13 @@ function App() {
                 >
                   Pieces
                 </button>
+                <button 
+                  onClick={() => setInspectorTab('ai')}
+                  className={`pb-1 px-1 transition-colors flex items-center gap-1 ${inspectorTab === 'ai' ? 'text-purple-600 border-b-2 border-purple-600 font-bold' : 'hover:text-slate-800'}`}
+                >
+                  <Sparkles size={12} className={inspectorTab === 'ai' ? 'text-purple-600' : 'text-slate-400'} />
+                  AI Media
+                </button>
               </div>
 
               {/* Tab: Files */}
@@ -1657,6 +1682,108 @@ function App() {
                     <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-2xs bg-slate-300"></span> In Swarm</span>
                     <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-2xs bg-slate-200"></span> Missing</span>
                   </div>
+                </div>
+              )}
+
+              {/* Tab: Local AI Media Intelligence */}
+              {inspectorTab === 'ai' && (
+                <div className="space-y-3 text-xs max-h-72 overflow-y-auto custom-scroll pr-1">
+                  {loadingAI ? (
+                    <div className="py-8 flex flex-col items-center justify-center text-slate-400 gap-2">
+                      <Loader2 size={22} className="animate-spin text-purple-600" />
+                      <span>Analyzing metadata with Local AI...</span>
+                    </div>
+                  ) : mediaAIData?.torrent_metadata ? (
+                    <div className="space-y-3">
+                      <div className="p-3 bg-gradient-to-br from-purple-50 to-indigo-50 border border-purple-200/70 rounded-2xl flex flex-col gap-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-purple-700 uppercase tracking-wider flex items-center gap-1">
+                            <Sparkles size={12} /> Local AI Media Parser
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-purple-100 text-purple-800">
+                            {mediaAIData.torrent_metadata.media_type}
+                          </span>
+                        </div>
+
+                        <div>
+                          <div className="text-sm font-bold text-slate-900">
+                            {mediaAIData.torrent_metadata.clean_title}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                            {mediaAIData.torrent_metadata.season > 0 && (
+                              <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold">
+                                S{mediaAIData.torrent_metadata.season < 10 ? `0${mediaAIData.torrent_metadata.season}` : mediaAIData.torrent_metadata.season}
+                                E{mediaAIData.torrent_metadata.episode < 10 ? `0${mediaAIData.torrent_metadata.episode}` : mediaAIData.torrent_metadata.episode}
+                              </span>
+                            )}
+                            {mediaAIData.torrent_metadata.year > 0 && (
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-medium">
+                                {mediaAIData.torrent_metadata.year}
+                              </span>
+                            )}
+                            {mediaAIData.torrent_metadata.resolution && (
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                                {mediaAIData.torrent_metadata.resolution}
+                              </span>
+                            )}
+                            {mediaAIData.torrent_metadata.source && (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-medium">
+                                {mediaAIData.torrent_metadata.source}
+                              </span>
+                            )}
+                            {mediaAIData.torrent_metadata.video_codec && (
+                              <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[10px] font-medium">
+                                {mediaAIData.torrent_metadata.video_codec}
+                              </span>
+                            )}
+                            {mediaAIData.torrent_metadata.audio_format && (
+                              <span className="px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 text-[10px] font-medium">
+                                {mediaAIData.torrent_metadata.audio_format}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Suggested Standard Filename */}
+                        <div className="mt-1 pt-2 border-t border-purple-200/50">
+                          <div className="text-[10px] text-slate-500 font-medium mb-1">Standardized Clean Filename (Plex / Jellyfin):</div>
+                          <div className="flex items-center justify-between gap-2 p-2 bg-white/80 rounded-xl border border-purple-200/80 font-mono text-[11px] text-slate-800 break-all">
+                            <span>{mediaAIData.torrent_metadata.suggested_filename}</span>
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(mediaAIData.torrent_metadata.suggested_filename)
+                                setCopiedAIFilename(true)
+                                setTimeout(() => setCopiedAIFilename(false), 2000)
+                              }}
+                              className="p-1 rounded-lg hover:bg-purple-100 text-purple-700 shrink-0 transition-colors"
+                              title="Copy Clean Name"
+                            >
+                              {copiedAIFilename ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Files breakdown if multiple */}
+                      {mediaAIData.files && mediaAIData.files.length > 1 && (
+                        <div className="space-y-1.5">
+                          <div className="text-[11px] font-semibold text-slate-600">Parsed Files ({mediaAIData.files.length}):</div>
+                          {mediaAIData.files.map((f: any, idx: number) => (
+                            <div key={idx} className="p-2 bg-white rounded-xl border border-slate-200/80 flex flex-col gap-1">
+                              <div className="text-slate-500 truncate text-[10px]">{f.original_name}</div>
+                              <div className="font-medium text-slate-800 text-[11px] text-purple-900 font-mono truncate">
+                                → {f.metadata.suggested_filename}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="py-8 text-center text-slate-400">
+                      No media intelligence metadata found for this torrent.
+                    </div>
+                  )}
                 </div>
               )}
             </div>
