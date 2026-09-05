@@ -5,10 +5,12 @@ on:
     branches: [ "main", "master" ]
     paths:
       - 'cpp/**'
+      - 'postman/**'
   pull_request:
     branches: [ "main", "master" ]
     paths:
       - 'cpp/**'
+      - 'postman/**'
 
 jobs:
   build:
@@ -29,3 +31,30 @@ jobs:
     - name: Test
       working-directory: cpp/build
       run: mkdir -p /tmp/test_home && HOME=/tmp/test_home ctest --output-on-failure
+
+    - name: Setup Node.js for Newman API Testing
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: 'npm'
+
+    - name: Install Node Dependencies
+      run: npm ci
+
+    - name: Run Newman API Tests
+      run: |
+        mkdir -p /tmp/fluxtorrent_test_home
+        HOME=/tmp/fluxtorrent_test_home ./cpp/build/torrent_client &
+        SERVER_PID=$!
+
+        for i in {1..20}; do
+          if curl -s http://localhost:8080/api/settings > /dev/null; then
+            echo "OmniFlux backend server is up and responsive."
+            break
+          fi
+          echo "Waiting for server to listen on :8080 ($i)..."
+          sleep 1
+        done
+
+        npm run test:api
+        kill $SERVER_PID || true

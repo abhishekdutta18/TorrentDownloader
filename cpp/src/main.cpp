@@ -21,6 +21,8 @@
 #include "search.hpp"
 #include "rss_worker.hpp"
 #include "security.hpp"
+#include "media_ai.hpp"
+#include "qbittorrent_api.hpp"
 #include <fstream>
 #include <filesystem>
 
@@ -419,6 +421,7 @@ int main() {
     load_global_settings(engine, rss_worker);
     rss_worker.start();
     setup_settings_routes(svr, engine, rss_worker);
+    torrent::setup_qbittorrent_routes(svr, engine);
 
     // Serve static frontend files (Support both CLI build/ folder and macOS App Resources/ folder)
     if (std::filesystem::exists("./public")) {
@@ -798,6 +801,57 @@ void setup_engine_routes(httplib::Server& svr, torrent::Engine& engine) {
             }
         } catch (const std::exception& e) {
             res.status = 400;
+            res.set_content(json{{"status", "error"}, {"message", e.what()}}.dump(), "application/json");
+        }
+    });
+
+    // API: Local AI Media Scene Parser
+    svr.Post("/api/ai/parse_media", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            auto body = json::parse(req.body);
+            std::string title = body.value("title", "");
+            if (title.empty()) {
+                res.status = 400;
+                res.set_content(R"({"status":"error","message":"'title' parameter is required"})", "application/json");
+                return;
+            }
+            auto meta = torrent::MediaParser::parse(title);
+            json resp = {
+                {"status", "success"},
+                {"metadata", meta.to_json()}
+            };
+            res.set_content(resp.dump(), "application/json");
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content(json{{"status", "error"}, {"message", e.what()}}.dump(), "application/json");
+        }
+    });
+
+    // API: Local AI Metadata Analysis for Specific Torrent & Files
+    svr.Get(R"(/api/torrents/([^/]+)/media_ai)", [&engine](const httplib::Request& req, httplib::Response& res) {
+        std::string info_hash = req.matches[1];
+        try {
+            auto state = engine.get_torrent_state(info_hash);
+            auto files = engine.get_torrent_files(info_hash);
+            json parsed_files = json::array();
+            for (const auto& f : files) {
+                auto meta = torrent::MediaParser::parse(f.name);
+                parsed_files.push_back({
+                    {"index", f.index},
+                    {"original_name", f.name},
+                    {"path", f.path},
+                    {"metadata", meta.to_json()}
+                });
+            }
+            auto torrent_meta = torrent::MediaParser::parse(state.name);
+            json response = {
+                {"status", "success"},
+                {"torrent_metadata", torrent_meta.to_json()},
+                {"files", parsed_files}
+            };
+            res.set_content(response.dump(), "application/json");
+        } catch (const std::exception& e) {
+            res.status = 404;
             res.set_content(json{{"status", "error"}, {"message", e.what()}}.dump(), "application/json");
         }
     });
