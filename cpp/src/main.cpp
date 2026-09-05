@@ -119,6 +119,10 @@ void setup_settings_routes(httplib::Server& svr, torrent::Engine& engine, torren
         if (!global_settings.contains("enableMalwareProtection")) global_settings["enableMalwareProtection"] = torrent::SecurityManager::instance().is_enabled();
         if (!global_settings.contains("autoSkipRiskyFiles")) global_settings["autoSkipRiskyFiles"] = torrent::SecurityManager::instance().is_auto_skip_risky();
         if (!global_settings.contains("enableCloudLookup")) global_settings["enableCloudLookup"] = torrent::SecurityManager::instance().is_cloud_lookup_enabled();
+        if (!global_settings.contains("groqApiKey")) {
+            const char* env_key = std::getenv("GROQ_API_KEY");
+            global_settings["groqApiKey"] = env_key ? std::string(env_key) : "";
+        }
         res.set_content(global_settings.dump(), "application/json");
     });
 

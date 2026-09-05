@@ -16,6 +16,7 @@ interface AppSettings {
   enableMalwareProtection?: boolean
   autoSkipRiskyFiles?: boolean
   enableCloudLookup?: boolean
+  groqApiKey?: string
 }
 
 interface Window {

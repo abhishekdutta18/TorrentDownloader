@@ -1576,7 +1576,21 @@ class OmniPlayerEngine: ObservableObject {
     @Published var isAITranscribing: Bool = false
     
     // Free Online AI (User Configurable Keys)
-    @Published var groqApiKey: String = UserDefaults.standard.string(forKey: "omni_groq_key") ?? "" {
+    @Published var groqApiKey: String = {
+        if let stored = UserDefaults.standard.string(forKey: "omni_groq_key"), !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return stored
+        }
+        if let env = ProcessInfo.processInfo.environment["GROQ_API_KEY"], !env.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return env
+        }
+        let settingsPath = NSString(string: "~/.fluxtorrent/settings.json").expandingTildeInPath
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: settingsPath)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let key = json["groqApiKey"] as? String, !key.isEmpty {
+            return key
+        }
+        return ""
+    }() {
         didSet { UserDefaults.standard.set(groqApiKey, forKey: "omni_groq_key") }
     }
     @Published var geminiApiKey: String = UserDefaults.standard.string(forKey: "omni_gemini_key") ?? "" {

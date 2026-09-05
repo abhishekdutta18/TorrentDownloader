@@ -1,5 +1,26 @@
 import { useState, useEffect, useRef } from 'react'
-import { ShieldCheck, ShieldAlert, Shield } from 'lucide-react'
+import { ShieldCheck, ShieldAlert, Shield, Sparkles, Key } from 'lucide-react'
+
+const getStoredGroqKey = (): string => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage && typeof window.localStorage.getItem === 'function') {
+      return window.localStorage.getItem('omni_groq_key') || ''
+    }
+  } catch {}
+  return ''
+}
+
+const setStoredGroqKey = (val: string) => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      if (val && typeof window.localStorage.setItem === 'function') {
+        window.localStorage.setItem('omni_groq_key', val)
+      } else if (!val && typeof window.localStorage.removeItem === 'function') {
+        window.localStorage.removeItem('omni_groq_key')
+      }
+    }
+  } catch {}
+}
 
 export function Settings() {
   const [settings, setSettings] = useState<AppSettings | null>(null)
@@ -17,11 +38,19 @@ export function Settings() {
     if (window.torrentApi) {
       window.torrentApi.getSettings().then((s) => {
         if (!isMounted.current) return
+        if (!s.groqApiKey) {
+          const localKey = getStoredGroqKey()
+          if (localKey) {
+            s.groqApiKey = localKey
+          }
+        } else {
+          setStoredGroqKey(s.groqApiKey)
+        }
         setSettings(s)
         settingsRef.current = s
         setUploadKB(s.uploadLimit > 0 ? String(Math.round(s.uploadLimit / 1024)) : '0')
         setDownloadKB(s.downloadLimit > 0 ? String(Math.round(s.downloadLimit / 1024)) : '0')
-      })
+      }).catch(() => {})
     }
     return () => {
       isMounted.current = false
@@ -382,6 +411,68 @@ export function Settings() {
               </span>
             </div>
           </label>
+        </div>
+      </div>
+
+      {/* AI Speech & Subtitles (Groq Whisper) */}
+      <div className="glass-card bg-white/80 p-5 rounded-2xl border border-white shadow-2xs space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-200/70 pb-2">
+          <div className="flex items-center gap-2">
+            <Sparkles className="text-purple-600" size={16} />
+            <h3 className="text-sm font-bold text-slate-900">AI Speech & Subtitles (Groq Whisper)</h3>
+          </div>
+          <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
+            settings.groqApiKey ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+          }`}>
+            {settings.groqApiKey ? '✓ Active' : 'Not Configured'}
+          </span>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="font-semibold text-slate-700 flex items-center gap-1.5">
+                <Key size={13} className="text-purple-600" />
+                <span>Groq API Key</span>
+              </label>
+              <a 
+                href="https://console.groq.com/keys" 
+                target="_blank" 
+                rel="noreferrer" 
+                className="text-[11px] text-purple-600 hover:underline font-semibold"
+              >
+                Get Free API Key at console.groq.com ↗
+              </a>
+            </div>
+            <div className="flex gap-2">
+              <input 
+                type="password"
+                value={settings.groqApiKey || ''}
+                onChange={(e) => {
+                  const val = e.target.value.trim()
+                  debouncedSave({ groqApiKey: val })
+                  setStoredGroqKey(val)
+                }}
+                placeholder="gsk_..."
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+              {settings.groqApiKey && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    debouncedSave({ groqApiKey: '' })
+                    setStoredGroqKey('')
+                  }}
+                  className="glass-btn px-3 py-1.5 rounded-xl font-semibold text-red-600 hover:text-red-700"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1.5">
+              Powers automatic speech-to-text subtitle creation in the video player and AI scene intelligence. Free tier includes ultra-fast Whisper Large v3 processing.
+            </p>
+          </div>
         </div>
       </div>
       

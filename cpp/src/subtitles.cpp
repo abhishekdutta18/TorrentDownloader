@@ -613,8 +613,29 @@ void setup_subtitle_routes(httplib::Server& svr, Engine& engine) {
             std::string lang = body.value("language", "en");
 
             if (groq_key.empty()) {
+                // Check ~/.fluxtorrent/settings.json
+                try {
+                    std::string home = std::getenv("HOME") ? std::getenv("HOME") : "";
+                    if (!home.empty()) {
+                        std::string set_file = home + "/.fluxtorrent/settings.json";
+                        if (fs::exists(set_file)) {
+                            std::ifstream f(set_file);
+                            auto sj = nlohmann::json::parse(f);
+                            if (sj.contains("groqApiKey") && !sj["groqApiKey"].get<std::string>().empty()) {
+                                groq_key = sj["groqApiKey"].get<std::string>();
+                            }
+                        }
+                    }
+                } catch (...) {}
+            }
+            if (groq_key.empty()) {
+                const char* env_key = std::getenv("GROQ_API_KEY");
+                if (env_key) groq_key = env_key;
+            }
+
+            if (groq_key.empty()) {
                 res.status = 400;
-                res.set_content(R"({"status":"error","message":"Groq API Key is required"})", "application/json");
+                res.set_content(R"({"status":"error","message":"Groq API Key is required. Configure it in Settings or enter it in the modal."})", "application/json");
                 return;
             }
 

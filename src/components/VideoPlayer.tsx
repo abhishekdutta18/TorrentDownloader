@@ -25,6 +25,27 @@ interface OnlineSubtitleItem {
   download_count: number
 }
 
+const getStoredGroqKey = (): string => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage && typeof window.localStorage.getItem === 'function') {
+      return window.localStorage.getItem('omni_groq_key') || ''
+    }
+  } catch {}
+  return ''
+}
+
+const setStoredGroqKey = (val: string) => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      if (val && typeof window.localStorage.setItem === 'function') {
+        window.localStorage.setItem('omni_groq_key', val)
+      } else if (!val && typeof window.localStorage.removeItem === 'function') {
+        window.localStorage.removeItem('omni_groq_key')
+      }
+    }
+  } catch {}
+}
+
 export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [hasError, setHasError] = useState(false)
@@ -44,7 +65,7 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
   const [movieHash, setMovieHash] = useState<string>('')
 
   // AI Subtitle States
-  const [groqApiKey, setGroqApiKey] = useState<string>(() => localStorage.getItem('omni_groq_key') || '')
+  const [groqApiKey, setGroqApiKey] = useState<string>(() => getStoredGroqKey())
   const [isAITranscribing, setIsAITranscribing] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
   const [aiSuccess, setAiSuccess] = useState<string | null>(null)
@@ -220,7 +241,7 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
     setAiSuccess(null)
 
     try {
-      localStorage.setItem('omni_groq_key', trimmedKey)
+      setStoredGroqKey(trimmedKey)
       const res = await fetch(`${apiBase}/api/torrents/${infoHash}/files/${fileIndex}/subtitles/ai_transcribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -639,7 +660,7 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
                         value={groqApiKey}
                         onChange={(e) => {
                           setGroqApiKey(e.target.value)
-                          localStorage.setItem('omni_groq_key', e.target.value)
+                          setStoredGroqKey(e.target.value)
                         }}
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
                       />

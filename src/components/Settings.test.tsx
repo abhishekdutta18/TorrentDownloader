@@ -45,4 +45,17 @@ describe('Settings Component', () => {
     const cloudLookupToggle = screen.getByText('Cloud Threat Intelligence (MalwareBazaar)')
     expect(cloudLookupToggle).toBeTruthy()
   })
+
+  it('renders AI Speech & Subtitles (Groq Whisper) settings with input and link', async () => {
+    render(<Settings />)
+
+    const heading = await screen.findByText('AI Speech & Subtitles (Groq Whisper)')
+    expect(heading).toBeTruthy()
+
+    const placeholderInput = screen.getByPlaceholderText('gsk_...')
+    expect(placeholderInput).toBeTruthy()
+
+    const portalLink = screen.getByText(/console\.groq\.com/i)
+    expect(portalLink).toBeTruthy()
+  })
 })
