@@ -1574,6 +1574,7 @@ class OmniPlayerEngine: ObservableObject {
     @Published var subtitleSearchResults: [SubtitleResultItem] = []
     @Published var isSearchingSubtitles: Bool = false
     @Published var isAITranscribing: Bool = false
+    @Published var aiTranscribeStatus: String = ""
     
     // Free Online AI (User Configurable Keys)
     @Published var groqApiKey: String = {
@@ -2405,13 +2406,14 @@ class OmniPlayerEngine: ObservableObject {
                 guard let self = self else { return }
                 if !cues.isEmpty {
                     self.primaryCues = cues
-                    // Suppress internal VLC SPU renderer so it doesn't double-render beneath SwiftUI's overlay
+                    if let cue = self.findCue(at: self.currentTime, in: cues) {
+                        self.primarySubtitleText = cue.text
+                    }
                     self.vlc.currentSubtitleTrack = -1
-                    self.selectedSubtitleId = -1
+                    self.selectedSubtitleId = 999
                     self.showOSD("Subtitles Loaded (\(cues.count) cues)")
-                } else {
-                    _ = self.vlc.addSubtitleFile(path: path)
                 }
+                _ = self.vlc.addSubtitleFile(path: path)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     self.refreshTracks()
                 }
@@ -2998,6 +3000,7 @@ class OmniPlayerEngine: ObservableObject {
         }
         
         isAITranscribing = true
+        aiTranscribeStatus = "Extracting audio track with FFmpeg..."
         showOSD("🎙 AI: Extracting speech audio...")
         
         DispatchQueue.global(qos: .userInitiated).async {
@@ -3091,6 +3094,7 @@ class OmniPlayerEngine: ObservableObject {
             }
             
             DispatchQueue.main.async {
+                self.aiTranscribeStatus = "Transcribing speech via Groq Whisper LPU..."
                 self.showOSD("✨ AI: Transcribing via Groq Whisper (LPU)...")
             }
             
@@ -3126,6 +3130,7 @@ class OmniPlayerEngine: ObservableObject {
                 if let err = err {
                     DispatchQueue.main.async {
                         self.isAITranscribing = false
+                        self.aiTranscribeStatus = ""
                         self.showOSD("Groq network error: \(err.localizedDescription)")
                     }
                     return
@@ -3134,6 +3139,7 @@ class OmniPlayerEngine: ObservableObject {
                 guard let httpResponse = response as? HTTPURLResponse else {
                     DispatchQueue.main.async {
                         self.isAITranscribing = false
+                        self.aiTranscribeStatus = ""
                         self.showOSD("Groq API returned invalid response")
                     }
                     return
@@ -3151,6 +3157,7 @@ class OmniPlayerEngine: ObservableObject {
                     }
                     DispatchQueue.main.async {
                         self.isAITranscribing = false
+                        self.aiTranscribeStatus = ""
                         self.showOSD("⚠️ AI Subtitle Error: \(errorMsg)")
                     }
                     return
@@ -3159,6 +3166,7 @@ class OmniPlayerEngine: ObservableObject {
                 guard let data = data, let srt = String(data: data, encoding: .utf8), !srt.isEmpty, srt.contains("-->") else {
                     DispatchQueue.main.async {
                         self.isAITranscribing = false
+                        self.aiTranscribeStatus = ""
                         self.showOSD("AI returned no speech/subtitles for this media")
                     }
                     return
@@ -3171,8 +3179,10 @@ class OmniPlayerEngine: ObservableObject {
                 
                 DispatchQueue.main.async {
                     self.isAITranscribing = false
+                    self.aiTranscribeStatus = ""
                     self.loadPrimarySubtitle(path: srtPath)
-                    self.showOSD("✨ AI Subtitles Created via Groq Whisper!")
+                    self.showSmartSubtitleSheet = false
+                    self.showOSD("✨ AI Subtitles Created (\(self.primaryCues.count) cues)!")
                 }
             }.resume()
         }
@@ -4141,13 +4151,20 @@ struct OmniSmartSubtitleSheetView: View {
                 HStack {
                     Button(action: { engine.generateAISubtitles() }) {
                         HStack(spacing: 6) {
-                            Image(systemName: "sparkles")
-                            Text("AI Auto-Transcribe Subtitles (Groq Whisper)")
+                            if engine.isAITranscribing {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                Text("Transcribing Speech...")
+                            } else {
+                                Image(systemName: "sparkles")
+                                Text("AI Auto-Transcribe Subtitles (Groq Whisper)")
+                            }
                         }
                         .font(.caption.bold())
                     }
                     .buttonStyle(.bordered)
                     .tint(.yellow)
+                    .disabled(engine.isAITranscribing)
                     
                     Spacer()
                     
@@ -4161,7 +4178,21 @@ struct OmniSmartSubtitleSheetView: View {
             
             Divider().background(Color.white.opacity(0.12))
             
-            if engine.isSearchingSubtitles {
+            if engine.isAITranscribing {
+                VStack(spacing: 12) {
+                    Spacer()
+                    ProgressView()
+                        .scaleEffect(1.3)
+                    Text(engine.aiTranscribeStatus.isEmpty ? "Transcribing speech via Groq Whisper LPU..." : engine.aiTranscribeStatus)
+                        .font(.headline.bold())
+                        .foregroundColor(.yellow)
+                    Text("Fast Groq LPU processing usually completes within 5–15 seconds.\nSubtitles will be loaded and displayed on the video automatically.")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                    Spacer()
+                }
+            } else if engine.isSearchingSubtitles {
                 VStack(spacing: 12) {
                     Spacer()
                     ProgressView()

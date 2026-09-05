@@ -1,5 +1,5 @@
 import { X, ExternalLink, Play, AlertCircle, Captions, Search, Download, Check, Loader2, Globe, Cpu, Sparkles, Key } from 'lucide-react'
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 
 interface VideoPlayerProps {
   streamUrl: string
@@ -23,6 +23,55 @@ interface OnlineSubtitleItem {
   download_url: string
   is_hash_match: boolean
   download_count: number
+}
+
+interface SubtitleCueItem {
+  start: number
+  end: number
+  text: string
+}
+
+function parseTimeToSeconds(timeStr: string): number {
+  const parts = timeStr.trim().replace(',', '.').split(':')
+  if (parts.length === 3) {
+    return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2])
+  } else if (parts.length === 2) {
+    return parseFloat(parts[0]) * 60 + parseFloat(parts[1])
+  }
+  return 0
+}
+
+function parseWebVTT(text: string): SubtitleCueItem[] {
+  const cues: SubtitleCueItem[] = []
+  const clean = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const lines = clean.split('\n')
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i].trim()
+    if (line.includes('-->')) {
+      const parts = line.split('-->')
+      if (parts.length >= 2) {
+        const start = parseTimeToSeconds(parts[0])
+        const end = parseTimeToSeconds(parts[1].trim().split(' ')[0])
+        i++
+        const textLines: string[] = []
+        while (i < lines.length && lines[i].trim() !== '') {
+          const cleaned = lines[i].replace(/<[^>]+>/g, '').trim()
+          if (cleaned) {
+            textLines.push(cleaned)
+          }
+          i++
+        }
+        const cueText = textLines.join('\n')
+        if (cueText && end > start) {
+          cues.push({ start, end, text: cueText })
+        }
+      }
+    }
+    i++
+  }
+  return cues
 }
 
 const getStoredGroqKey = (): string => {
@@ -64,9 +113,16 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
   const [searchLang, setSearchLang] = useState('en')
   const [movieHash, setMovieHash] = useState<string>('')
 
+  // Subtitle Overlay & Guaranteed On-Screen Display States
+  const [parsedCues, setParsedCues] = useState<SubtitleCueItem[]>([])
+  const [currentVideoTime, setCurrentVideoTime] = useState<number>(0)
+
   // AI Subtitle States
   const [groqApiKey, setGroqApiKey] = useState<string>(() => getStoredGroqKey())
   const [isAITranscribing, setIsAITranscribing] = useState(false)
+  const [aiStage, setAiStage] = useState<'idle' | 'extracting' | 'transcribing' | 'applying'>('idle')
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0)
+  const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [aiError, setAiError] = useState<string | null>(null)
   const [aiSuccess, setAiSuccess] = useState<string | null>(null)
   const [activeModalTab, setActiveModalTab] = useState<'opensubtitles' | 'ai'>('opensubtitles')
@@ -153,7 +209,40 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
     setIsTranscoding(prev => !prev)
   }
 
-  // Configure text track when active track changes
+  // Fetch and parse WebVTT cues for guaranteed on-screen rendering
+  useEffect(() => {
+    if (!activeTrack || infoHash === undefined || fileIndex === undefined) {
+      setParsedCues([])
+      return
+    }
+
+    let isSubscribed = true
+    const url = `${apiBase}/api/torrents/${infoHash}/files/${fileIndex}/subtitles/stream?path=${encodeURIComponent(activeTrack.path)}`
+
+    fetch(url)
+      .then(res => res.text())
+      .then(vttText => {
+        if (!isSubscribed) return
+        const cues = parseWebVTT(vttText)
+        setParsedCues(cues)
+      })
+      .catch(err => {
+        console.warn('Failed to load WebVTT cues for overlay:', err)
+        if (isSubscribed) setParsedCues([])
+      })
+
+    return () => {
+      isSubscribed = false
+    }
+  }, [activeTrack, infoHash, fileIndex, apiBase])
+
+  // Active cue matching current video playback position
+  const activeCue = useMemo(() => {
+    if (!activeTrack || parsedCues.length === 0) return null
+    return parsedCues.find(c => currentVideoTime >= c.start && currentVideoTime <= c.end)
+  }, [activeTrack, parsedCues, currentVideoTime])
+
+  // Configure text track when active track changes (kept for native player accessibility)
   useEffect(() => {
     if (!videoRef.current) return
     const video = videoRef.current
@@ -237,8 +326,20 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
     if (infoHash === undefined || fileIndex === undefined) return
 
     setIsAITranscribing(true)
+    setAiStage('extracting')
+    setElapsedSeconds(0)
     setAiError(null)
     setAiSuccess(null)
+
+    if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
+    elapsedTimerRef.current = setInterval(() => {
+      setElapsedSeconds(prev => prev + 1)
+    }, 1000)
+
+    // Stage progression hints to keep user informed
+    const stageTimer = setTimeout(() => {
+      setAiStage('transcribing')
+    }, 2500)
 
     try {
       setStoredGroqKey(trimmedKey)
@@ -256,6 +357,8 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
         throw new Error(data.message || 'AI transcription failed')
       }
 
+      setAiStage('applying')
+
       const newTrack: SubtitleTrack = {
         id: `ai-${Date.now()}`,
         label: `✨ AI (${(data.language || searchLang).toUpperCase()} Groq Whisper)`,
@@ -265,14 +368,21 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
 
       setLocalTracks(prev => [newTrack, ...prev.filter(t => t.path !== data.saved_path)])
       setActiveTrack(newTrack)
-      setAiSuccess('✨ AI Subtitles created and applied successfully!')
+      setAiSuccess('✨ AI Subtitles created and active on screen!')
       setTimeout(() => {
         setShowSearchModal(false)
         setAiSuccess(null)
+        setAiStage('idle')
       }, 1500)
     } catch (err: any) {
       setAiError(err.message || 'Failed to generate AI subtitles')
+      setAiStage('idle')
     } finally {
+      clearTimeout(stageTimer)
+      if (elapsedTimerRef.current) {
+        clearInterval(elapsedTimerRef.current)
+        elapsedTimerRef.current = null
+      }
       setIsAITranscribing(false)
     }
   }
@@ -479,6 +589,7 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
               autoPlay
               playsInline
               crossOrigin="anonymous"
+              onTimeUpdate={(e) => setCurrentVideoTime(e.currentTarget.currentTime)}
               onError={() => {
                 const err = videoRef.current?.error
                 const codeMap: Record<number, string> = {
@@ -506,6 +617,16 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
               )}
               Your browser does not support HTML5 video streaming.
             </video>
+          )}
+
+          {/* 100% Guaranteed On-Screen Subtitle Overlay */}
+          {activeCue && (
+            <div 
+              className="absolute bottom-16 sm:bottom-20 left-1/2 -translate-x-1/2 max-w-[88%] md:max-w-[80%] px-4 py-2 bg-black/85 backdrop-blur-sm text-white text-sm sm:text-base md:text-xl font-medium tracking-wide rounded-xl text-center shadow-2xl pointer-events-none z-30 transition-all border border-white/20 select-none whitespace-pre-line leading-relaxed"
+              style={{ textShadow: '0 2px 4px rgba(0,0,0,0.95)' }}
+            >
+              {activeCue.text}
+            </div>
           )}
 
           {/* Subtitles & AI Transcription Modal */}
@@ -710,9 +831,38 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
                     </div>
 
                     {isAITranscribing && (
-                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-2 text-xs text-slate-600">
-                        <Loader2 size={15} className="animate-spin text-purple-600 shrink-0" />
-                        <span>Extracting speech and transcribing with Groq LPU...</span>
+                      <div className="p-4 bg-gradient-to-br from-purple-50 to-indigo-50 border border-purple-200 rounded-2xl space-y-3 shadow-inner">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="relative flex items-center justify-center">
+                              <span className="animate-ping absolute inline-flex h-3 w-3 rounded-full bg-purple-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-purple-600"></span>
+                            </div>
+                            <span className="text-xs font-bold text-purple-950">AI Whisper Transcription Active</span>
+                          </div>
+                          <span className="text-[11px] font-mono font-bold text-purple-700 bg-purple-100/90 px-2.5 py-0.5 rounded-full">
+                            {elapsedSeconds}s elapsed
+                          </span>
+                        </div>
+
+                        <div className="space-y-2 text-xs">
+                          <div className={`flex items-center gap-2 ${aiStage === 'extracting' ? 'text-purple-800 font-bold' : 'text-slate-500'}`}>
+                            {aiStage === 'extracting' ? <Loader2 size={13} className="animate-spin text-purple-600 shrink-0" /> : <Check size={13} className="text-emerald-600 shrink-0" />}
+                            <span>Step 1: Extract speech audio track with FFmpeg</span>
+                          </div>
+                          <div className={`flex items-center gap-2 ${aiStage === 'transcribing' ? 'text-purple-800 font-bold' : (aiStage === 'applying' ? 'text-slate-500' : 'text-slate-400')}`}>
+                            {aiStage === 'transcribing' ? <Loader2 size={13} className="animate-spin text-purple-600 shrink-0" /> : (aiStage === 'applying' ? <Check size={13} className="text-emerald-600 shrink-0" /> : <div className="w-3 h-3 rounded-full border border-slate-300 ml-0.5 shrink-0" />)}
+                            <span>Step 2: Transcribe dialog via Groq Whisper Large v3 LPU</span>
+                          </div>
+                          <div className={`flex items-center gap-2 ${aiStage === 'applying' ? 'text-purple-800 font-bold' : 'text-slate-400'}`}>
+                            {aiStage === 'applying' ? <Loader2 size={13} className="animate-spin text-purple-600 shrink-0" /> : <div className="w-3 h-3 rounded-full border border-slate-300 ml-0.5 shrink-0" />}
+                            <span>Step 3: Synchronize WebVTT subtitle cues onto video</span>
+                          </div>
+                        </div>
+
+                        <p className="text-[11px] text-purple-700/80 leading-normal">
+                          Fast Groq LPU processing usually completes within 5–15 seconds. Subtitles will be displayed automatically on screen.
+                        </p>
                       </div>
                     )}
 
