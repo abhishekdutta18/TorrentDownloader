@@ -2984,51 +2984,85 @@ class OmniPlayerEngine: ObservableObject {
         }
         
         isAITranscribing = true
-        showOSD("🎙 AI: Extracting audio...")
+        showOSD("🎙 AI: Extracting speech audio...")
         
         DispatchQueue.global(qos: .userInitiated).async {
             let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!.appendingPathComponent("OmniPlayer/AI_Audio")
             try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
             
             let tempAudio = cacheDir.appendingPathComponent("extract_\(UUID().uuidString).mp3")
+            let inputTarget = url.isFileURL ? url.path : url.absoluteString
             
-            // Dynamic VLC CLI resolution
-            let candidates = [
-                Bundle.main.bundlePath + "/Contents/MacOS/VLC",
-                "/Applications/VLC.app/Contents/MacOS/VLC",
-                NSString(string: "~/Applications/VLC.app/Contents/MacOS/VLC").expandingTildeInPath,
-                "/opt/homebrew/bin/vlc",
-                "/usr/local/bin/vlc"
+            // Dynamic audio extraction: check FFmpeg first (fast), fallback to VLC CLI
+            let ffmpegCandidates = [
+                "/opt/homebrew/bin/ffmpeg",
+                "/usr/local/bin/ffmpeg",
+                "/usr/bin/ffmpeg"
             ]
-            let vlcBin = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }) ?? "/Applications/VLC.app/Contents/MacOS/VLC"
+            let ffmpegBin = ffmpegCandidates.first(where: { FileManager.default.fileExists(atPath: $0) })
             
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: vlcBin)
-            process.arguments = [
-                "-I", "dummy",
-                "--no-repeat",
-                "--no-loop",
-                url.path,
-                ":sout=#transcode{acodec=mp3,ab=32,channels=1,samplerate=16000}:standard{access=file,mux=raw,dst=\(tempAudio.path)}",
-                "vlc://quit"
-            ]
+            var extractionSuccess = false
             
-            do {
-                try process.run()
-                process.waitUntilExit()
-            } catch {
-                DispatchQueue.main.async {
-                    self.isAITranscribing = false
-                    self.showOSD("Audio extraction failed: \(error.localizedDescription)")
+            if let ffBin = ffmpegBin {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: ffBin)
+                process.arguments = [
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel", "error",
+                    "-i", inputTarget,
+                    "-vn",
+                    "-ac", "1",
+                    "-ar", "16000",
+                    "-b:a", "16k",
+                    "-f", "mp3",
+                    tempAudio.path
+                ]
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    extractionSuccess = (process.terminationStatus == 0) && FileManager.default.fileExists(atPath: tempAudio.path)
+                } catch {
+                    extractionSuccess = false
                 }
-                return
             }
             
-            guard FileManager.default.fileExists(atPath: tempAudio.path),
+            if !extractionSuccess {
+                // Dynamic VLC CLI resolution fallback
+                let vlcCandidates = [
+                    Bundle.main.bundlePath + "/Contents/MacOS/VLC",
+                    "/Applications/VLC.app/Contents/MacOS/VLC",
+                    NSString(string: "~/Applications/VLC.app/Contents/MacOS/VLC").expandingTildeInPath,
+                    "/opt/homebrew/bin/vlc",
+                    "/usr/local/bin/vlc"
+                ]
+                let vlcBin = vlcCandidates.first(where: { FileManager.default.fileExists(atPath: $0) }) ?? "/Applications/VLC.app/Contents/MacOS/VLC"
+                
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: vlcBin)
+                process.arguments = [
+                    "-I", "dummy",
+                    "--no-repeat",
+                    "--no-loop",
+                    inputTarget,
+                    ":sout=#transcode{acodec=mp3,ab=16,channels=1,samplerate=16000}:standard{access=file,mux=raw,dst=\(tempAudio.path)}",
+                    "vlc://quit"
+                ]
+                
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    extractionSuccess = FileManager.default.fileExists(atPath: tempAudio.path)
+                } catch {
+                    extractionSuccess = false
+                }
+            }
+            
+            guard extractionSuccess,
                   let audioData = try? Data(contentsOf: tempAudio), audioData.count > 512 else {
                 DispatchQueue.main.async {
                     self.isAITranscribing = false
-                    self.showOSD("Extracted audio empty")
+                    self.showOSD("Audio extraction failed. Ensure FFmpeg or VLC is installed.")
                 }
                 return
             }
@@ -3050,8 +3084,9 @@ class OmniPlayerEngine: ObservableObject {
             guard let whisperURL = URL(string: "https://api.groq.com/openai/v1/audio/transcriptions") else { return }
             var request = URLRequest(url: whisperURL)
             request.httpMethod = "POST"
-            request.setValue("Bearer \(self.groqApiKey)", forHTTPHeaderField: "Authorization")
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
             request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            request.timeoutInterval = 90.0
             
             var body = Data()
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
@@ -3077,15 +3112,40 @@ class OmniPlayerEngine: ObservableObject {
                 if let err = err {
                     DispatchQueue.main.async {
                         self.isAITranscribing = false
-                        self.showOSD("Groq Whisper error: \(err.localizedDescription)")
+                        self.showOSD("Groq network error: \(err.localizedDescription)")
                     }
                     return
                 }
                 
-                guard let data = data, let srt = String(data: data, encoding: .utf8), !srt.isEmpty else {
+                guard let httpResponse = response as? HTTPURLResponse else {
                     DispatchQueue.main.async {
                         self.isAITranscribing = false
-                        self.showOSD("AI returned empty transcription")
+                        self.showOSD("Groq API returned invalid response")
+                    }
+                    return
+                }
+                
+                guard httpResponse.statusCode == 200 else {
+                    var errorMsg = "HTTP \(httpResponse.statusCode)"
+                    if let data = data,
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let errorObj = json["error"] as? [String: Any],
+                       let msg = errorObj["message"] as? String {
+                        errorMsg = msg
+                    } else if let data = data, let text = String(data: data, encoding: .utf8), !text.isEmpty {
+                        errorMsg = text.prefix(100).description
+                    }
+                    DispatchQueue.main.async {
+                        self.isAITranscribing = false
+                        self.showOSD("⚠️ AI Subtitle Error: \(errorMsg)")
+                    }
+                    return
+                }
+                
+                guard let data = data, let srt = String(data: data, encoding: .utf8), !srt.isEmpty, srt.contains("-->") else {
+                    DispatchQueue.main.async {
+                        self.isAITranscribing = false
+                        self.showOSD("AI returned no speech/subtitles for this media")
                     }
                     return
                 }
@@ -4044,6 +4104,23 @@ struct OmniSmartSubtitleSheetView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(.orange)
                         .font(.caption.bold())
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        Image(systemName: "key.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                        Text("Groq Key: ••••••••\(engine.groqApiKey.suffix(4))")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                        Spacer()
+                        Button("Change Key") {
+                            engine.groqApiKey = ""
+                            UserDefaults.standard.removeObject(forKey: "omni_groq_key")
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption.bold())
+                        .foregroundColor(.orange)
                     }
                 }
                 
@@ -5753,6 +5830,25 @@ struct OmniAIAssistantView: View {
                         }
                     }
                     .padding(10)
+                    .background(Color.purple.opacity(0.12))
+                    .cornerRadius(8)
+                } else {
+                    HStack {
+                        Image(systemName: "checkmark.seal.fill")
+                            .foregroundColor(.purple)
+                            .font(.caption)
+                        Text("Groq Key: ••••••••\(engine.groqApiKey.suffix(4))")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                        Spacer()
+                        Button("Change") {
+                            engine.groqApiKey = ""
+                            UserDefaults.standard.removeObject(forKey: "omni_groq_key")
+                        }
+                        .font(.caption.bold())
+                        .foregroundColor(.purple)
+                    }
+                    .padding(8)
                     .background(Color.purple.opacity(0.12))
                     .cornerRadius(8)
                 }

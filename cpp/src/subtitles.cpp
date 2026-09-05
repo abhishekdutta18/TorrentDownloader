@@ -1,11 +1,13 @@
 #include "subtitles.hpp"
 #include "media_ai.hpp"
+#include "transcoder.hpp"
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <regex>
 #include <filesystem>
 #include <algorithm>
+#include <chrono>
 
 namespace torrent {
 
@@ -311,6 +313,143 @@ bool SubtitleEngine::download_and_save(
     }
 }
 
+bool SubtitleEngine::generate_ai_subtitles(
+    const std::string& video_path,
+    const std::string& groq_key,
+    const std::string& lang,
+    std::string& out_srt_path,
+    std::string& out_vtt_content,
+    std::string& error_msg
+) {
+    if (groq_key.empty()) {
+        error_msg = "Groq API Key is required. Get one free at console.groq.com";
+        return false;
+    }
+
+    if (video_path.empty() || !fs::exists(video_path)) {
+        error_msg = "Video file not found on disk";
+        return false;
+    }
+
+    // 1. Audio Extraction
+    std::string temp_audio = "/tmp/groq_audio_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".mp3";
+    
+    // Check FFmpeg first
+    std::string ffmpeg_bin = TranscoderEngine::find_ffmpeg_binary();
+    bool extraction_ok = false;
+    
+    if (!ffmpeg_bin.empty()) {
+        std::string cmd = "\"" + ffmpeg_bin + "\" -y -hide_banner -loglevel error -i \"" + video_path + "\" -vn -ac 1 -ar 16000 -b:a 16k -f mp3 \"" + temp_audio + "\" 2>/dev/null";
+        int ret = system(cmd.c_str());
+        extraction_ok = (ret == 0) && fs::exists(temp_audio) && (fs::file_size(temp_audio) > 512);
+    }
+    
+    // Fallback to VLC CLI if ffmpeg failed or not found
+    if (!extraction_ok) {
+        std::vector<std::string> vlc_candidates = {
+            "/Applications/VLC.app/Contents/MacOS/VLC",
+            "/opt/homebrew/bin/vlc",
+            "/usr/local/bin/vlc"
+        };
+        for (const auto& vlc : vlc_candidates) {
+            if (fs::exists(vlc)) {
+                std::string cmd = "\"" + vlc + "\" -I dummy --no-repeat --no-loop \"" + video_path + "\" \":sout=#transcode{acodec=mp3,ab=16,channels=1,samplerate=16000}:standard{access=file,mux=raw,dst=" + temp_audio + "}\" vlc://quit 2>/dev/null";
+                system(cmd.c_str());
+                if (fs::exists(temp_audio) && fs::file_size(temp_audio) > 512) {
+                    extraction_ok = true;
+                    break;
+                }
+            }
+        }
+    }
+    
+    if (!extraction_ok || !fs::exists(temp_audio)) {
+        error_msg = "Audio extraction failed. Please ensure FFmpeg or VLC is installed.";
+        return false;
+    }
+    
+    uintmax_t audio_size = fs::file_size(temp_audio);
+    if (audio_size > 25 * 1024 * 1024) {
+        fs::remove(temp_audio);
+        error_msg = "Extracted audio exceeds Groq 25MB limit. Please use a shorter clip or lower bitrate.";
+        return false;
+    }
+    
+    std::ifstream audio_file(temp_audio, std::ios::binary);
+    if (!audio_file.is_open()) {
+        fs::remove(temp_audio);
+        error_msg = "Failed to open extracted audio for upload";
+        return false;
+    }
+    
+    std::string audio_data((std::istreambuf_iterator<char>(audio_file)), std::istreambuf_iterator<char>());
+    audio_file.close();
+    fs::remove(temp_audio);
+    
+    // 2. Groq Whisper API Request
+    try {
+        httplib::SSLClient cli("api.groq.com");
+        cli.set_connection_timeout(10, 0);
+        cli.set_read_timeout(90, 0); // Transcription of audio can take up to 30-60 seconds
+        
+        httplib::Headers headers = {
+            {"Authorization", "Bearer " + groq_key}
+        };
+        
+        std::string target_lang = lang.empty() ? "en" : lang;
+        httplib::UploadFormDataItems items = {
+            {"model", "whisper-large-v3", "", ""},
+            {"response_format", "srt", "", ""},
+            {"language", target_lang, "", ""},
+            {"file", audio_data, "audio.mp3", "audio/mpeg"}
+        };
+        
+        auto res = cli.Post("/openai/v1/audio/transcriptions", headers, items);
+        if (!res) {
+            error_msg = "Failed to connect to Groq Whisper API (connection timed out)";
+            return false;
+        }
+        
+        if (res->status != 200) {
+            std::string groq_err = "HTTP " + std::to_string(res->status);
+            try {
+                auto j = nlohmann::json::parse(res->body);
+                if (j.contains("error") && j["error"].contains("message")) {
+                    groq_err = j["error"]["message"].get<std::string>();
+                }
+            } catch (...) {}
+            error_msg = "Groq Whisper API error: " + groq_err;
+            return false;
+        }
+        
+        std::string srt_content = res->body;
+        if (srt_content.empty() || srt_content.find("-->") == std::string::npos) {
+            error_msg = "Groq Whisper returned no speech dialogue or invalid SRT format";
+            return false;
+        }
+        
+        // 3. Save generated SRT to disk beside video
+        fs::path vpath(video_path);
+        std::string out_name = vpath.stem().string() + ".ai." + target_lang + ".srt";
+        fs::path out_file = vpath.parent_path() / out_name;
+        
+        std::ofstream out(out_file, std::ios::binary);
+        if (!out.is_open()) {
+            error_msg = "Could not save subtitle file to disk";
+            return false;
+        }
+        out.write(srt_content.data(), srt_content.size());
+        out.close();
+        
+        out_srt_path = out_file.string();
+        out_vtt_content = srt_to_webvtt(srt_content);
+        return true;
+    } catch (const std::exception& e) {
+        error_msg = std::string("AI transcription error: ") + e.what();
+        return false;
+    }
+}
+
 void setup_subtitle_routes(httplib::Server& svr, Engine& engine) {
     // GET /api/torrents/:hash/files/:index/subtitles
     svr.Get(R"(/api/torrents/([^/]+)/files/(\d+)/subtitles)", [&engine](const httplib::Request& req, httplib::Response& res) {
@@ -461,6 +600,58 @@ void setup_subtitle_routes(httplib::Server& svr, Engine& engine) {
         res.set_header("Content-Type", "text/vtt; charset=utf-8");
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_content(vtt_output, "text/vtt; charset=utf-8");
+    });
+
+    // POST /api/torrents/:hash/files/:index/subtitles/ai_transcribe
+    svr.Post(R"(/api/torrents/([^/]+)/files/(\d+)/subtitles/ai_transcribe)", [&engine](const httplib::Request& req, httplib::Response& res) {
+        std::string hash = req.matches[1];
+        int file_idx = std::stoi(req.matches[2]);
+
+        try {
+            auto body = nlohmann::json::parse(req.body);
+            std::string groq_key = body.value("groq_api_key", "");
+            std::string lang = body.value("language", "en");
+
+            if (groq_key.empty()) {
+                res.status = 400;
+                res.set_content(R"({"status":"error","message":"Groq API Key is required"})", "application/json");
+                return;
+            }
+
+            auto files = engine.get_torrent_files(hash);
+            if (file_idx < 0 || file_idx >= static_cast<int>(files.size())) {
+                res.status = 404;
+                res.set_content(R"({"status":"error","message":"File index out of range"})", "application/json");
+                return;
+            }
+
+            auto state = engine.get_torrent_state(hash);
+            std::string full_path = state.save_path + "/" + files[file_idx].path;
+
+            std::string out_srt_path;
+            std::string out_vtt;
+            std::string error_msg;
+
+            bool ok = SubtitleEngine::generate_ai_subtitles(full_path, groq_key, lang, out_srt_path, out_vtt, error_msg);
+            if (ok) {
+                res.status = 200;
+                res.set_content(nlohmann::json{
+                    {"status", "success"},
+                    {"saved_path", out_srt_path},
+                    {"webvtt", out_vtt},
+                    {"language", lang}
+                }.dump(), "application/json");
+            } else {
+                res.status = 422;
+                res.set_content(nlohmann::json{
+                    {"status", "error"},
+                    {"message", error_msg.empty() ? "AI subtitle generation failed" : error_msg}
+                }.dump(), "application/json");
+            }
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content(nlohmann::json{{"status", "error"}, {"message", e.what()}}.dump(), "application/json");
+        }
     });
 
     // POST /api/subtitles/convert

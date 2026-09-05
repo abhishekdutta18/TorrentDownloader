@@ -1,4 +1,4 @@
-import { X, ExternalLink, Play, AlertCircle, Captions, Search, Download, Check, Loader2, Globe, Cpu } from 'lucide-react'
+import { X, ExternalLink, Play, AlertCircle, Captions, Search, Download, Check, Loader2, Globe, Cpu, Sparkles, Key } from 'lucide-react'
 import { useEffect, useRef, useCallback, useState } from 'react'
 
 interface VideoPlayerProps {
@@ -42,6 +42,13 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
   const [isDownloading, setIsDownloading] = useState(false)
   const [searchLang, setSearchLang] = useState('en')
   const [movieHash, setMovieHash] = useState<string>('')
+
+  // AI Subtitle States
+  const [groqApiKey, setGroqApiKey] = useState<string>(() => localStorage.getItem('omni_groq_key') || '')
+  const [isAITranscribing, setIsAITranscribing] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [aiSuccess, setAiSuccess] = useState<string | null>(null)
+  const [activeModalTab, setActiveModalTab] = useState<'opensubtitles' | 'ai'>('opensubtitles')
 
   const apiBase = (window.location.port === '5173' || window.location.port === '3000') ? 'http://localhost:8080' : ''
   const effectiveStreamUrl = isTranscoding && infoHash !== undefined && fileIndex !== undefined
@@ -200,6 +207,55 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
     }
   }
 
+  const handleAITranscribe = async () => {
+    const trimmedKey = groqApiKey.trim()
+    if (!trimmedKey) {
+      setAiError('Please enter your Groq API Key (get one free at console.groq.com)')
+      return
+    }
+    if (infoHash === undefined || fileIndex === undefined) return
+
+    setIsAITranscribing(true)
+    setAiError(null)
+    setAiSuccess(null)
+
+    try {
+      localStorage.setItem('omni_groq_key', trimmedKey)
+      const res = await fetch(`${apiBase}/api/torrents/${infoHash}/files/${fileIndex}/subtitles/ai_transcribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          groq_api_key: trimmedKey,
+          language: searchLang
+        })
+      })
+
+      const data = await res.json()
+      if (!res.ok || data.status !== 'success') {
+        throw new Error(data.message || 'AI transcription failed')
+      }
+
+      const newTrack: SubtitleTrack = {
+        id: `ai-${Date.now()}`,
+        label: `✨ AI (${(data.language || searchLang).toUpperCase()} Groq Whisper)`,
+        language: data.language || searchLang,
+        path: data.saved_path
+      }
+
+      setLocalTracks(prev => [newTrack, ...prev.filter(t => t.path !== data.saved_path)])
+      setActiveTrack(newTrack)
+      setAiSuccess('✨ AI Subtitles created and applied successfully!')
+      setTimeout(() => {
+        setShowSearchModal(false)
+        setAiSuccess(null)
+      }, 1500)
+    } catch (err: any) {
+      setAiError(err.message || 'Failed to generate AI subtitles')
+    } finally {
+      setIsAITranscribing(false)
+    }
+  }
+
   return (
     <div 
       className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-6 animate-fade-in-up"
@@ -303,16 +359,29 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
                     </button>
                   ))}
 
-                  <div className="pt-1 border-t border-slate-100">
+                  <div className="pt-1 border-t border-slate-100 space-y-1">
                     <button
                       onClick={() => {
                         setShowSubMenu(false)
+                        setActiveModalTab('opensubtitles')
                         setShowSearchModal(true)
                       }}
-                      className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-blue-600 font-bold transition"
+                      className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-blue-600 font-bold transition cursor-pointer"
                     >
                       <Search size={12} />
                       <span>Search OpenSubtitles...</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowSubMenu(false)
+                        setActiveModalTab('ai')
+                        setShowSearchModal(true)
+                      }}
+                      className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white font-bold shadow-sm transition cursor-pointer"
+                    >
+                      <Sparkles size={12} />
+                      <span>✨ AI Subtitles (Whisper)...</span>
                     </button>
                   </div>
                 </div>
@@ -418,7 +487,7 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
             </video>
           )}
 
-          {/* Online Subtitles Modal */}
+          {/* Subtitles & AI Transcription Modal */}
           {showSearchModal && (
             <div 
               className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6"
@@ -428,90 +497,219 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
                 className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-5 space-y-4 max-h-[85%] flex flex-col"
                 onClick={e => e.stopPropagation()}
               >
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <div className="flex items-center gap-2">
-                    <Globe size={18} className="text-blue-600" />
-                    <h4 className="font-bold text-slate-800 text-sm">OpenSubtitles Search</h4>
+                {/* Header & Tabs */}
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { setActiveModalTab('opensubtitles'); setAiError(null); setAiSuccess(null) }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                        activeModalTab === 'opensubtitles'
+                          ? 'bg-blue-50 text-blue-700 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                      }`}
+                    >
+                      <Globe size={14} />
+                      <span>OpenSubtitles</span>
+                    </button>
+
+                    <button
+                      onClick={() => { setActiveModalTab('ai'); setAiError(null); setAiSuccess(null) }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                        activeModalTab === 'ai'
+                          ? 'bg-purple-50 text-purple-700 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                      }`}
+                    >
+                      <Sparkles size={14} />
+                      <span>AI Whisper Subtitles</span>
+                    </button>
                   </div>
+
                   <button 
                     onClick={() => setShowSearchModal(false)}
-                    className="p-1 rounded-lg text-slate-400 hover:text-slate-700"
+                    className="p-1 rounded-lg text-slate-400 hover:text-slate-700 cursor-pointer"
                   >
                     <X size={16} />
                   </button>
                 </div>
 
-                <div className="flex gap-2">
-                  <select
-                    value={searchLang}
-                    onChange={(e) => setSearchLang(e.target.value)}
-                    className="bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-700"
-                  >
-                    <option value="en">English</option>
-                    <option value="es">Spanish</option>
-                    <option value="fr">French</option>
-                    <option value="de">German</option>
-                    <option value="it">Italian</option>
-                    <option value="pt">Portuguese</option>
-                  </select>
-
-                  <button
-                    onClick={handleSearchOnline}
-                    disabled={isSearching}
-                    className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 disabled:opacity-50"
-                  >
-                    {isSearching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-                    <span>Search Online</span>
-                  </button>
-                </div>
-
-                <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scroll min-h-[160px]">
-                  {isSearching ? (
-                    <div className="flex flex-col items-center justify-center py-10 text-slate-400 space-y-2">
-                      <Loader2 size={24} className="animate-spin text-blue-500" />
-                      <p className="text-xs">Searching OpenSubtitles API...</p>
-                    </div>
-                  ) : onlineResults.length === 0 ? (
-                    <div className="text-center py-10 text-slate-400 text-xs">
-                      No online subtitles found. Try a different language.
-                    </div>
-                  ) : (
-                    onlineResults.map((sub) => (
-                      <div 
-                        key={sub.id} 
-                        className="flex items-center justify-between p-3 rounded-xl border border-slate-200/80 bg-slate-50 hover:bg-white transition"
+                {activeModalTab === 'opensubtitles' ? (
+                  <>
+                    <div className="flex gap-2">
+                      <select
+                        value={searchLang}
+                        onChange={(e) => setSearchLang(e.target.value)}
+                        className="bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-700"
                       >
-                        <div className="min-w-0 pr-3">
-                          <p className="font-semibold text-xs text-slate-800 truncate" title={sub.release_name}>
-                            {sub.release_name}
-                          </p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-bold uppercase">
-                              {sub.language}
-                            </span>
-                            {sub.is_hash_match && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">
-                                ✓ Exact Hash Match
-                              </span>
-                            )}
-                            <span className="text-[10px] text-slate-400">
-                              {sub.download_count} downloads
-                            </span>
-                          </div>
-                        </div>
+                        <option value="en">English</option>
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                        <option value="it">Italian</option>
+                        <option value="pt">Portuguese</option>
+                      </select>
 
-                        <button
-                          onClick={() => handleDownloadSubtitle(sub)}
-                          disabled={isDownloading}
-                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 disabled:opacity-50 shrink-0 cursor-pointer"
+                      <button
+                        onClick={handleSearchOnline}
+                        disabled={isSearching}
+                        className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                      >
+                        {isSearching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                        <span>Search Online</span>
+                      </button>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scroll min-h-[160px]">
+                      {isSearching ? (
+                        <div className="flex flex-col items-center justify-center py-10 text-slate-400 space-y-2">
+                          <Loader2 size={24} className="animate-spin text-blue-500" />
+                          <p className="text-xs">Searching OpenSubtitles API...</p>
+                        </div>
+                      ) : onlineResults.length === 0 ? (
+                        <div className="text-center py-10 text-slate-400 text-xs">
+                          No online subtitles found. Try a different language.
+                        </div>
+                      ) : (
+                        onlineResults.map((sub) => (
+                          <div 
+                            key={sub.id} 
+                            className="flex items-center justify-between p-3 rounded-xl border border-slate-200/80 bg-slate-50 hover:bg-white transition"
+                          >
+                            <div className="min-w-0 pr-3">
+                              <p className="font-semibold text-xs text-slate-800 truncate" title={sub.release_name}>
+                                {sub.release_name}
+                              </p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-bold uppercase">
+                                  {sub.language}
+                                </span>
+                                {sub.is_hash_match && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">
+                                    ✓ Exact Hash Match
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-slate-400">
+                                  {sub.download_count} downloads
+                                </span>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => handleDownloadSubtitle(sub)}
+                              disabled={isDownloading}
+                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 disabled:opacity-50 shrink-0 cursor-pointer"
+                            >
+                              <Download size={12} />
+                              <span>Get</span>
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  /* AI Whisper Speech-to-Text Tab */
+                  <div className="space-y-4 py-1">
+                    <div className="p-3 bg-purple-50 border border-purple-100 rounded-2xl text-xs space-y-1">
+                      <div className="flex items-center gap-1.5 font-bold text-purple-800">
+                        <Sparkles size={14} />
+                        <span>Free Speech-to-Text via Groq Whisper Large v3</span>
+                      </div>
+                      <p className="text-purple-600 leading-relaxed">
+                        Extracts speech audio and transcribes subtitle cues in seconds using Groq LPUs.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                        <Key size={13} className="text-purple-600" />
+                        <span>Groq API Key</span>
+                        <a 
+                          href="https://console.groq.com/keys" 
+                          target="_blank" 
+                          rel="noreferrer" 
+                          className="ml-auto text-[10px] text-purple-600 hover:underline font-semibold"
                         >
-                          <Download size={12} />
-                          <span>Get</span>
+                          Get Free API Key ↗
+                        </a>
+                      </label>
+                      <input
+                        type="password"
+                        placeholder="gsk_..."
+                        value={groqApiKey}
+                        onChange={(e) => {
+                          setGroqApiKey(e.target.value)
+                          localStorage.setItem('omni_groq_key', e.target.value)
+                        }}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                    </div>
+
+                    <div className="flex items-end gap-3">
+                      <div className="flex-1">
+                        <label className="text-xs font-bold text-slate-700 block mb-1">
+                          Spoken Language
+                        </label>
+                        <select
+                          value={searchLang}
+                          onChange={(e) => setSearchLang(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-700"
+                        >
+                          <option value="en">English</option>
+                          <option value="es">Spanish</option>
+                          <option value="fr">French</option>
+                          <option value="de">German</option>
+                          <option value="it">Italian</option>
+                          <option value="pt">Portuguese</option>
+                          <option value="ja">Japanese</option>
+                          <option value="zh">Chinese</option>
+                          <option value="ko">Korean</option>
+                        </select>
+                      </div>
+
+                      <div className="flex-1">
+                        <button
+                          onClick={handleAITranscribe}
+                          disabled={isAITranscribing}
+                          className="w-full py-2 px-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer shadow-md shadow-purple-500/20"
+                        >
+                          {isAITranscribing ? (
+                            <>
+                              <Loader2 size={13} className="animate-spin" />
+                              <span>Transcribing...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles size={13} />
+                              <span>Generate Subtitles</span>
+                            </>
+                          )}
                         </button>
                       </div>
-                    ))
-                  )}
-                </div>
+                    </div>
+
+                    {isAITranscribing && (
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-2 text-xs text-slate-600">
+                        <Loader2 size={15} className="animate-spin text-purple-600 shrink-0" />
+                        <span>Extracting speech and transcribing with Groq LPU...</span>
+                      </div>
+                    )}
+
+                    {aiError && (
+                      <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-xs text-rose-700">
+                        <AlertCircle size={15} className="shrink-0 text-rose-500" />
+                        <span className="break-words">{aiError}</span>
+                      </div>
+                    )}
+
+                    {aiSuccess && (
+                      <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-2 text-xs text-emerald-700">
+                        <Check size={15} className="shrink-0 text-emerald-500" />
+                        <span>{aiSuccess}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}

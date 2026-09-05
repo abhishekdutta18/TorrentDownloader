@@ -59,6 +59,16 @@ public:
 
     // Detect language code from filename (e.g. "movie.en.srt" -> "en")
     static std::string detect_language_from_path(const std::string& sub_path);
+
+    // AI Speech-to-Text Subtitle Generation via Groq Whisper Large v3
+    static bool generate_ai_subtitles(
+        const std::string& video_path,
+        const std::string& groq_key,
+        const std::string& lang,
+        std::string& out_srt_path,
+        std::string& out_vtt_content,
+        std::string& error_msg
+    );
 };
 
 // Mount REST routes for subtitles onto httplib::Server

@@ -124,3 +124,22 @@ TEST_CASE("SubtitleEngine: Local Subtitle Discovery", "[subtitles]") {
 
     fs::remove_all(temp_dir);
 }
+
+TEST_CASE("SubtitleEngine: AI Subtitle Generation Validation", "[subtitles]") {
+    std::string out_srt;
+    std::string out_vtt;
+    std::string err;
+
+    SECTION("Fails when Groq key is empty") {
+        bool ok = torrent::SubtitleEngine::generate_ai_subtitles("/path/to/movie.mkv", "", "en", out_srt, out_vtt, err);
+        REQUIRE(!ok);
+        REQUIRE(err.find("Groq API Key is required") != std::string::npos);
+    }
+
+    SECTION("Fails when video file does not exist") {
+        bool ok = torrent::SubtitleEngine::generate_ai_subtitles("/non/existent/file.mkv", "gsk_test123", "en", out_srt, out_vtt, err);
+        REQUIRE(!ok);
+        REQUIRE(err.find("Video file not found") != std::string::npos);
+    }
+}
+
