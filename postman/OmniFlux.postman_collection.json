@@ -1860,6 +1860,165 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "Subtitles & Closed Captions",
+      "description": "Subtitle management, OpenSubtitles hash queries, on-demand downloading, and on-the-fly WebVTT streaming for media playback.",
+      "item": [
+        {
+          "name": "Discover Subtitles (Local & OpenSubtitles)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 404\", function () {",
+                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test(\"Subtitles discovery payload schema is valid\", function () {",
+                  "        var data = pm.response.json();",
+                  "        pm.expect(data).to.have.property(\"status\", \"success\");",
+                  "        pm.expect(data).to.have.property(\"local_subtitles\");",
+                  "        pm.expect(data).to.have.property(\"online_subtitles\");",
+                  "        pm.expect(Array.isArray(data.local_subtitles)).to.be.true;",
+                  "        pm.expect(Array.isArray(data.online_subtitles)).to.be.true;",
+                  "    });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/files/{{fileIndex}}/subtitles?lang=en",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "files",
+                "{{fileIndex}}",
+                "subtitles"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "en"
+                }
+              ]
+            },
+            "description": "Scans for local subtitle files alongside media and queries OpenSubtitles by 64-bit MovieHash and parsed title."
+          },
+          "response": []
+        },
+        {
+          "name": "Convert SRT to WebVTT",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Response starts with WEBVTT\", function () {",
+                  "    pm.expect(pm.response.text()).to.include(\"WEBVTT\");",
+                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"text/vtt\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              },
+              {
+                "key": "Accept",
+                "value": "text/vtt"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "1\n00:01:20,000 --> 00:01:23,456\nHello, world!\n\n2\n00:01:24,100 --> 00:01:27,890\nSecond subtitle line.\n"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/subtitles/convert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "subtitles",
+                "convert"
+              ]
+            },
+            "description": "Converts arbitrary SRT subtitle syntax to HTML5 standard WebVTT."
+          },
+          "response": []
+        },
+        {
+          "name": "Stream WebVTT Subtitle Track",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 404\", function () {",
+                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test(\"Returns text/vtt content type\", function () {",
+                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"text/vtt\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/vtt"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/files/{{fileIndex}}/subtitles/stream",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "files",
+                "{{fileIndex}}",
+                "subtitles",
+                "stream"
+              ]
+            },
+            "description": "Streams the active subtitle file converted to WebVTT for immediate browser rendering."
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "event": [

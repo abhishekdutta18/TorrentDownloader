@@ -1,4 +1,4 @@
-import { X, ExternalLink, Play, AlertCircle } from 'lucide-react'
+import { X, ExternalLink, Play, AlertCircle, Captions, Search, Download, Check, Loader2, Globe } from 'lucide-react'
 import { useEffect, useRef, useCallback, useState } from 'react'
 
 interface VideoPlayerProps {
@@ -9,10 +9,39 @@ interface VideoPlayerProps {
   onClose: () => void
 }
 
+interface SubtitleTrack {
+  id: string
+  label: string
+  language: string
+  path: string
+}
+
+interface OnlineSubtitleItem {
+  id: string
+  language: string
+  release_name: string
+  download_url: string
+  is_hash_match: boolean
+  download_count: number
+}
+
 export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [hasError, setHasError] = useState(false)
   const [errorDetails, setErrorDetails] = useState<string | null>(null)
+
+  // Subtitle States
+  const [activeTrack, setActiveTrack] = useState<SubtitleTrack | null>(null)
+  const [localTracks, setLocalTracks] = useState<SubtitleTrack[]>([])
+  const [showSubMenu, setShowSubMenu] = useState(false)
+  const [showSearchModal, setShowSearchModal] = useState(false)
+  const [onlineResults, setOnlineResults] = useState<OnlineSubtitleItem[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false)
+  const [searchLang, setSearchLang] = useState('en')
+  const [movieHash, setMovieHash] = useState<string>('')
+
+  const apiBase = (window.location.port === '5173' || window.location.port === '3000') ? 'http://localhost:8080' : ''
 
   const handleClose = useCallback(() => {
     if (videoRef.current) {
@@ -25,26 +54,134 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleClose()
+      if (e.key === 'Escape') {
+        if (showSearchModal) {
+          setShowSearchModal(false)
+        } else {
+          handleClose()
+        }
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleClose])
+  }, [handleClose, showSearchModal])
+
+  // Load Subtitles on mount
+  useEffect(() => {
+    if (infoHash === undefined || fileIndex === undefined) return
+
+    const loadSubtitles = async () => {
+      try {
+        const res = await fetch(`${apiBase}/api/torrents/${infoHash}/files/${fileIndex}/subtitles?lang=${searchLang}`)
+        if (!res.ok) return
+        const data = await res.json()
+        if (data.status === 'success') {
+          if (data.movie_hash) setMovieHash(data.movie_hash)
+          
+          const locals: SubtitleTrack[] = (data.local_subtitles || []).map((s: any, idx: number) => ({
+            id: s.id || `local-${idx}`,
+            label: `${(s.language || 'en').toUpperCase()} - ${s.release_name || 'Local'}`,
+            language: s.language || 'en',
+            path: s.local_path
+          }))
+          setLocalTracks(locals)
+
+          // Auto-select first English or local subtitle if present
+          if (locals.length > 0) {
+            const enSub = locals.find(l => l.language.toLowerCase() === 'en') || locals[0]
+            setActiveTrack(curr => curr || enSub)
+          }
+
+          if (data.online_subtitles) {
+            setOnlineResults(data.online_subtitles)
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to discover subtitles:', err)
+      }
+    }
+
+    loadSubtitles()
+  }, [infoHash, fileIndex, apiBase, searchLang])
+
+  // Configure text track when active track changes
+  useEffect(() => {
+    if (!videoRef.current) return
+    const video = videoRef.current
+    const timer = setTimeout(() => {
+      if (video.textTracks && video.textTracks.length > 0) {
+        for (let i = 0; i < video.textTracks.length; i++) {
+          video.textTracks[i].mode = activeTrack ? 'showing' : 'disabled'
+        }
+      }
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [activeTrack])
 
   const handleOpenInSystemPlayer = async () => {
     if (infoHash !== undefined && fileIndex !== undefined) {
       try {
-        const base = (window.location.port === '5173' || window.location.port === '3000') ? 'http://localhost:8080' : ''
-        await fetch(`${base}/api/torrents/${infoHash}/files/${fileIndex}/play`, { method: 'POST' })
+        await fetch(`${apiBase}/api/torrents/${infoHash}/files/${fileIndex}/play`, { method: 'POST' })
       } catch (e) {
         console.warn('Failed to open system player:', e)
       }
     }
   }
 
+  const handleSearchOnline = async () => {
+    if (infoHash === undefined || fileIndex === undefined) return
+    setIsSearching(true)
+    try {
+      const res = await fetch(`${apiBase}/api/torrents/${infoHash}/files/${fileIndex}/subtitles?lang=${searchLang}`)
+      if (res.ok) {
+        const data = await res.json()
+        if (data.online_subtitles) {
+          setOnlineResults(data.online_subtitles)
+        }
+      }
+    } catch (e) {
+      console.warn('Failed online subtitle query:', e)
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  const handleDownloadSubtitle = async (item: OnlineSubtitleItem) => {
+    if (infoHash === undefined || fileIndex === undefined) return
+    setIsDownloading(true)
+    try {
+      const res = await fetch(`${apiBase}/api/torrents/${infoHash}/files/${fileIndex}/subtitles/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          download_url: item.download_url,
+          language: item.language
+        })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.saved_path) {
+          const newTrack: SubtitleTrack = {
+            id: item.id,
+            label: `${item.language.toUpperCase()} (Downloaded)`,
+            language: item.language,
+            path: data.saved_path
+          }
+          setLocalTracks(prev => [newTrack, ...prev])
+          setActiveTrack(newTrack)
+          setShowSearchModal(false)
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to download subtitle:', e)
+    } finally {
+      setIsDownloading(false)
+    }
+  }
+
   return (
     <div 
-      className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-900/30 backdrop-blur-md p-6 animate-fade-in-up"
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-6 animate-fade-in-up"
       role="dialog"
       aria-modal="true"
       aria-label="OmniFlux Video Stream"
@@ -64,9 +201,81 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
             <span className="text-xs font-bold truncate text-slate-700 tracking-tight">
               {title || 'Live Swarm Video Stream'}
             </span>
+            {activeTrack && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-semibold border border-blue-200">
+                CC: {activeTrack.language.toUpperCase()}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Subtitles Button & Popover */}
+            <div className="relative">
+              <button
+                onClick={() => setShowSubMenu(!showSubMenu)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  activeTrack 
+                    ? 'bg-blue-600 text-white shadow-xs' 
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                }`}
+                title="Subtitles & Closed Captions"
+              >
+                <Captions size={13} />
+                <span>{activeTrack ? activeTrack.language.toUpperCase() : 'Subtitles'}</span>
+              </button>
+
+              {showSubMenu && (
+                <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 p-2 z-50 animate-fade-in text-xs space-y-1">
+                  <div className="px-2 py-1 font-bold text-slate-800 border-b border-slate-100 flex items-center justify-between">
+                    <span>Subtitle Tracks</span>
+                    {movieHash && <span className="font-mono text-[9px] text-slate-400">#{movieHash.slice(0, 6)}</span>}
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setActiveTrack(null)
+                      setShowSubMenu(false)
+                    }}
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl transition ${
+                      activeTrack === null ? 'bg-blue-50 text-blue-700 font-bold' : 'hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <span>Off (None)</span>
+                    {activeTrack === null && <Check size={13} />}
+                  </button>
+
+                  {localTracks.map((track) => (
+                    <button
+                      key={track.id}
+                      onClick={() => {
+                        setActiveTrack(track)
+                        setShowSubMenu(false)
+                      }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl transition text-left ${
+                        activeTrack?.id === track.id ? 'bg-blue-50 text-blue-700 font-bold' : 'hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <span className="truncate pr-2">{track.label}</span>
+                      {activeTrack?.id === track.id && <Check size={13} className="shrink-0" />}
+                    </button>
+                  ))}
+
+                  <div className="pt-1 border-t border-slate-100">
+                    <button
+                      onClick={() => {
+                        setShowSubMenu(false)
+                        setShowSearchModal(true)
+                      }}
+                      className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-blue-600 font-bold transition"
+                    >
+                      <Search size={12} />
+                      <span>Search OpenSubtitles...</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {infoHash && (
               <button
                 onClick={handleOpenInSystemPlayer}
@@ -121,6 +330,7 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
               controls
               autoPlay
               playsInline
+              crossOrigin="anonymous"
               onError={() => {
                 const err = videoRef.current?.error
                 const codeMap: Record<number, string> = {
@@ -136,8 +346,116 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
               }}
               className="w-full h-full object-contain"
             >
+              {activeTrack && infoHash !== undefined && fileIndex !== undefined && (
+                <track
+                  key={activeTrack.path}
+                  kind="subtitles"
+                  src={`${apiBase}/api/torrents/${infoHash}/files/${fileIndex}/subtitles/stream?path=${encodeURIComponent(activeTrack.path)}`}
+                  srcLang={activeTrack.language}
+                  label={activeTrack.label}
+                  default
+                />
+              )}
               Your browser does not support HTML5 video streaming.
             </video>
+          )}
+
+          {/* Online Subtitles Modal */}
+          {showSearchModal && (
+            <div 
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6"
+              onClick={() => setShowSearchModal(false)}
+            >
+              <div 
+                className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-5 space-y-4 max-h-[85%] flex flex-col"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Globe size={18} className="text-blue-600" />
+                    <h4 className="font-bold text-slate-800 text-sm">OpenSubtitles Search</h4>
+                  </div>
+                  <button 
+                    onClick={() => setShowSearchModal(false)}
+                    className="p-1 rounded-lg text-slate-400 hover:text-slate-700"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <div className="flex gap-2">
+                  <select
+                    value={searchLang}
+                    onChange={(e) => setSearchLang(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-700"
+                  >
+                    <option value="en">English</option>
+                    <option value="es">Spanish</option>
+                    <option value="fr">French</option>
+                    <option value="de">German</option>
+                    <option value="it">Italian</option>
+                    <option value="pt">Portuguese</option>
+                  </select>
+
+                  <button
+                    onClick={handleSearchOnline}
+                    disabled={isSearching}
+                    className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    {isSearching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                    <span>Search Online</span>
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scroll min-h-[160px]">
+                  {isSearching ? (
+                    <div className="flex flex-col items-center justify-center py-10 text-slate-400 space-y-2">
+                      <Loader2 size={24} className="animate-spin text-blue-500" />
+                      <p className="text-xs">Searching OpenSubtitles API...</p>
+                    </div>
+                  ) : onlineResults.length === 0 ? (
+                    <div className="text-center py-10 text-slate-400 text-xs">
+                      No online subtitles found. Try a different language.
+                    </div>
+                  ) : (
+                    onlineResults.map((sub) => (
+                      <div 
+                        key={sub.id} 
+                        className="flex items-center justify-between p-3 rounded-xl border border-slate-200/80 bg-slate-50 hover:bg-white transition"
+                      >
+                        <div className="min-w-0 pr-3">
+                          <p className="font-semibold text-xs text-slate-800 truncate" title={sub.release_name}>
+                            {sub.release_name}
+                          </p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-bold uppercase">
+                              {sub.language}
+                            </span>
+                            {sub.is_hash_match && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">
+                                ✓ Exact Hash Match
+                              </span>
+                            )}
+                            <span className="text-[10px] text-slate-400">
+                              {sub.download_count} downloads
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => handleDownloadSubtitle(sub)}
+                          disabled={isDownloading}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 disabled:opacity-50 shrink-0 cursor-pointer"
+                        >
+                          <Download size={12} />
+                          <span>Get</span>
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>

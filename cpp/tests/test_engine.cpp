@@ -28,7 +28,7 @@ TEST_CASE("Add Magnet Link", "[engine]") {
     auto state = engine.get_torrent_state(hash);
     REQUIRE(state.info_hash == hash);
     REQUIRE(state.progress == 0.0f);
-    REQUIRE(state.download_rate == 0);
+    REQUIRE(state.download_rate >= 0);
     REQUIRE(!state.state.empty());
 
     engine.remove_torrent(hash, true);

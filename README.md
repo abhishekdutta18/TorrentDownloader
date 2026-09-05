@@ -215,6 +215,14 @@ OmniFlux's embedded C++ backend exposes a high-performance HTTP REST API on `htt
 | `POST` | `/api/ai/parse_media` | Parse raw scene release strings into title, year, season, episode, quality, codec, and clean Plex filenames. |
 | `GET` | `/api/torrents/:hash/media_ai` | Run AI scene detection and auto-renaming suggestions on all files in a torrent. |
 
+### Subtitles & Closed Captions
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/torrents/:hash/files/:index/subtitles?lang={lang}` | Discovers local subtitles and queries OpenSubtitles API by 64-bit MovieHash and parsed title. |
+| `POST` | `/api/torrents/:hash/files/:index/subtitles/download` | Downloads remote subtitle file and saves directly beside the media file on disk. |
+| `GET` | `/api/torrents/:hash/files/:index/subtitles/stream?path={path}` | Streams subtitle file converted on-the-fly to standard WebVTT (`text/vtt`) for browser playback. |
+| `POST` | `/api/subtitles/convert` | Converts raw SRT subtitle syntax into standard HTML5 WebVTT. |
+
 ---
 
 ## 🤖 *Arr Automation Integration (Sonarr, Radarr, Prowlarr)

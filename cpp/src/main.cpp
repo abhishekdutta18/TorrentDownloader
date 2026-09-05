@@ -23,6 +23,7 @@
 #include "security.hpp"
 #include "media_ai.hpp"
 #include "qbittorrent_api.hpp"
+#include "subtitles.hpp"
 #include <fstream>
 #include <filesystem>
 
@@ -422,6 +423,7 @@ int main() {
     rss_worker.start();
     setup_settings_routes(svr, engine, rss_worker);
     torrent::setup_qbittorrent_routes(svr, engine);
+    torrent::setup_subtitle_routes(svr, engine);
 
     // Serve static frontend files (Support both CLI build/ folder and macOS App Resources/ folder)
     if (std::filesystem::exists("./public")) {
