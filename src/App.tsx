@@ -51,6 +51,7 @@ interface Torrent {
   createdBy?: string
   comment?: string
   files: TorrentFile[]
+  category?: string
 }
 
 function formatBytes(bytes: number, decimals = 2) {
@@ -97,6 +98,12 @@ function App() {
   } | null>(null)
   const [clipboardMagnet, setClipboardMagnet] = useState<string | null>(null)
   const [isAllStopped, setIsAllStopped] = useState(false)
+  
+  // Category Filtering & Automation State
+  const [selectedCategory, setSelectedCategory] = useState<string>('all')
+  const [editingCategoryTorrent, setEditingCategoryTorrent] = useState<{ hash: string, currentCategory: string } | null>(null)
+  const [newCategoryInput, setNewCategoryInput] = useState('')
+  const [addCategory, setAddCategory] = useState('')
   
   // Side Panel Inspector State
   const [inspectorHash, setInspectorHash] = useState<string | null>(null)
@@ -434,6 +441,9 @@ function App() {
       if (window.torrentApi) {
         const res = await window.torrentApi.addTorrent(target, customSavePath || undefined)
         if (res && res.infoHash) {
+          if (addCategory.trim()) {
+            await handleSaveCategory(res.infoHash, addCategory.trim())
+          }
           const existing = torrents.find(t => t.infoHash === res.infoHash)
           if (existing && existing.done) {
             setActiveTab('completed')
@@ -445,9 +455,29 @@ function App() {
         }
       }
       setMagnetLink('')
+      setAddCategory('')
       setShowAddModal(false)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handleSaveCategory = async (hash: string, category: string) => {
+    try {
+      if (window.torrentApi?.setCategory) {
+        await window.torrentApi.setCategory(hash, category)
+      } else {
+        const base = (window.location.port === '5173' || window.location.port === '3000') ? 'http://localhost:8080' : ''
+        await fetch(`${base}/api/torrents/${hash}/category`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ category })
+        })
+      }
+      setTorrents(prev => prev.map(t => t.infoHash === hash ? { ...t, category } : t))
+      setEditingCategoryTorrent(null)
+    } catch (err) {
+      console.warn('Failed to update category:', err)
     }
   }
 
@@ -656,10 +686,33 @@ function App() {
   const totalPeers = torrents.reduce((acc, t) => acc + (t.numPeers || 0), 0)
   const totalSeeds = torrents.reduce((acc, t) => acc + (t.numSeeds || 0), 0)
 
+  // Dynamic categories and category counts
+  const availableCategories = Array.from(new Set([
+    'movies',
+    'tv',
+    'music',
+    'software',
+    'sonarr',
+    'radarr',
+    ...torrents.map(t => (t.category || '').toLowerCase().trim()).filter(Boolean)
+  ])).sort()
+
+  const categoryCounts = torrents.reduce((acc, t) => {
+    const cat = (t.category || '').toLowerCase().trim()
+    if (cat) {
+      acc[cat] = (acc[cat] || 0) + 1
+    }
+    return acc
+  }, {} as Record<string, number>)
+
   const displayedTorrents = torrents.filter(t => {
     if (activeTab === 'downloading') return !t.done
     if (activeTab === 'completed') return t.done
     return true
+  }).filter(t => {
+    if (selectedCategory === 'all') return true
+    if (selectedCategory === 'uncategorized') return !t.category || t.category.trim() === ''
+    return (t.category || '').toLowerCase().trim() === selectedCategory.toLowerCase().trim()
   }).filter(t => {
     if (!filterText) return true
     return (t.name || '').toLowerCase().includes(filterText.toLowerCase())
@@ -862,6 +915,58 @@ function App() {
               <Settings size={14} className="text-slate-400" />
               <span>Settings</span>
             </button>
+
+            {/* Categories Section */}
+            <div className="pt-3 border-t border-slate-200/60 mt-2">
+              <div className="px-2 pb-1.5 flex items-center justify-between text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                <div className="flex items-center gap-1.5">
+                  <Filter size={11} className="text-slate-400" />
+                  <span>Categories</span>
+                </div>
+                {selectedCategory !== 'all' && (
+                  <button 
+                    onClick={() => setSelectedCategory('all')} 
+                    className="text-[10px] text-blue-600 hover:underline cursor-pointer lowercase"
+                  >
+                    reset
+                  </button>
+                )}
+              </div>
+              <div className="space-y-0.5 max-h-44 overflow-y-auto pr-0.5 custom-scroll">
+                <button
+                  onClick={() => setSelectedCategory('all')}
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs transition-all ${
+                    selectedCategory === 'all'
+                      ? 'bg-white/95 text-blue-700 font-bold shadow-2xs border border-white'
+                      : 'text-slate-600 hover:bg-white/50'
+                  }`}
+                >
+                  <span className="truncate">All Categories</span>
+                  <span className="font-mono text-[10px] text-slate-400">{torrents.length}</span>
+                </button>
+                {availableCategories.map(cat => {
+                  const count = categoryCounts[cat.toLowerCase()] || 0
+                  return (
+                    <button
+                      key={cat}
+                      onClick={() => setSelectedCategory(cat.toLowerCase())}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs transition-all ${
+                        selectedCategory === cat.toLowerCase()
+                          ? 'bg-purple-50 text-purple-700 font-bold border border-purple-200/60 shadow-2xs'
+                          : 'text-slate-600 hover:bg-white/50'
+                      }`}
+                    >
+                      <span className="truncate capitalize">{cat}</span>
+                      {count > 0 && (
+                        <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-purple-100/70 text-purple-700 font-bold">
+                          {count}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           </nav>
 
           {/* Sidebar Status Footer */}
@@ -1278,6 +1383,31 @@ function App() {
                       }`}>
                         {t.done ? 'Seeding' : t.paused ? 'Paused' : 'Downloading'}
                       </span>
+                      {t.category ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setEditingCategoryTorrent({ hash: t.infoHash, currentCategory: t.category || '' })
+                            setNewCategoryInput(t.category || '')
+                          }}
+                          className="text-[10px] px-2 py-0.5 rounded-full font-bold border bg-purple-50 text-purple-700 border-purple-200/80 hover:bg-purple-100 transition-colors flex items-center gap-1 cursor-pointer"
+                          title="Click to change category"
+                        >
+                          <span>📁 {t.category}</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setEditingCategoryTorrent({ hash: t.infoHash, currentCategory: '' })
+                            setNewCategoryInput('')
+                          }}
+                          className="text-[10px] px-1.5 py-0.5 rounded-full text-slate-400 hover:text-purple-600 hover:bg-purple-50 transition-colors cursor-pointer border border-transparent hover:border-purple-200"
+                          title="Assign category"
+                        >
+                          + Category
+                        </button>
+                      )}
                     </div>
 
                     <div className="text-xs text-slate-500 font-mono flex items-center gap-3">
@@ -1881,6 +2011,42 @@ function App() {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-slate-600 font-semibold mb-1">Category (Optional)</label>
+                <input 
+                  type="text" 
+                  value={addCategory}
+                  onChange={(e) => setAddCategory(e.target.value)}
+                  placeholder="e.g. movies, tv, sonarr, radarr"
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-200 font-mono text-[11px]"
+                />
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {['movies', 'tv', 'music', 'sonarr', 'radarr'].map(preset => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setAddCategory(preset)}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-medium transition cursor-pointer border ${
+                        addCategory.toLowerCase() === preset
+                          ? 'bg-purple-100 text-purple-700 border-purple-300'
+                          : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-purple-50'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                  {addCategory && (
+                    <button
+                      type="button"
+                      onClick={() => setAddCategory('')}
+                      className="px-2 py-0.5 rounded-lg text-[10px] font-medium transition cursor-pointer text-red-600 hover:bg-red-50 border border-red-200"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {/* Browse .torrent file */}
               <div 
                 onClick={async () => {
@@ -1922,6 +2088,80 @@ function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Category Editor Modal Sheet */}
+      {editingCategoryTorrent && (
+        <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in-up">
+          <div className="w-full max-w-sm glass-window p-5 rounded-3xl space-y-4 shadow-2xl border border-white bg-white/95 text-xs">
+            <div className="flex justify-between items-center border-b border-slate-200/70 pb-2.5">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                <span>📁</span>
+                <span>Set Category</span>
+              </h3>
+              <button 
+                onClick={() => setEditingCategoryTorrent(null)}
+                className="w-6 h-6 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-800"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-slate-600 font-semibold">Category Name</label>
+              <input 
+                type="text"
+                value={newCategoryInput}
+                onChange={e => setNewCategoryInput(e.target.value)}
+                placeholder="e.g. movies, tv, sonarr, radarr"
+                className="w-full p-2.5 rounded-xl bg-white border border-slate-300 focus:outline-none focus:border-purple-500 font-mono text-xs shadow-2xs"
+                autoFocus
+              />
+              
+              <div className="pt-1">
+                <span className="text-[10px] text-slate-400 block mb-1">Quick Select:</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {['movies', 'tv', 'music', 'sonarr', 'radarr'].map(preset => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setNewCategoryInput(preset)}
+                      className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-purple-50 hover:text-purple-700 text-slate-600 text-[11px] font-medium transition cursor-pointer border border-slate-200/60"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                  {editingCategoryTorrent.currentCategory && (
+                    <button
+                      type="button"
+                      onClick={() => setNewCategoryInput('')}
+                      className="px-2 py-0.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-medium transition cursor-pointer border border-red-200/60"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200/70">
+              <button
+                type="button"
+                onClick={() => setEditingCategoryTorrent(null)}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSaveCategory(editingCategoryTorrent.hash, newCategoryInput.trim())}
+                className="px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+              >
+                Save
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2082,6 +2322,18 @@ function App() {
                   <span>Copy Magnet</span>
                 </button>
               )}
+
+              <button 
+                onClick={() => { 
+                  setEditingCategoryTorrent({ hash: activeTorrent.infoHash, currentCategory: activeTorrent.category || '' });
+                  setNewCategoryInput(activeTorrent.category || '');
+                  setMenuAnchor(null); 
+                }}
+                className="w-full text-left px-3 py-2 rounded-xl hover:bg-purple-50 text-purple-700 flex items-center gap-2.5 font-medium transition-colors cursor-pointer"
+              >
+                <Filter size={14} className="text-purple-500" />
+                <span>{activeTorrent.category ? `Category: ${activeTorrent.category}` : 'Set Category...'}</span>
+              </button>
 
               <div className="h-px bg-slate-200/60 my-1"></div>
 

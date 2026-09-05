@@ -24,6 +24,7 @@
 #include "media_ai.hpp"
 #include "qbittorrent_api.hpp"
 #include "subtitles.hpp"
+#include "transcoder.hpp"
 #include <fstream>
 #include <filesystem>
 
@@ -93,8 +94,16 @@ void load_global_settings(torrent::Engine& engine, torrent::RssWorker& rss_worke
     if (global_settings.contains("enableMalwareProtection")) torrent::SecurityManager::instance().set_enabled(global_settings["enableMalwareProtection"].get<bool>());
     if (global_settings.contains("autoSkipRiskyFiles")) torrent::SecurityManager::instance().set_auto_skip_risky(global_settings["autoSkipRiskyFiles"].get<bool>());
     if (global_settings.contains("enableCloudLookup")) torrent::SecurityManager::instance().set_cloud_lookup_enabled(global_settings["enableCloudLookup"].get<bool>());
+    if (global_settings.contains("torrentCategories") && global_settings["torrentCategories"].is_object()) {
+        std::unordered_map<std::string, std::string> cats;
+        for (auto& [h, c] : global_settings["torrentCategories"].items()) {
+            if (c.is_string()) cats[h] = c.get<std::string>();
+        }
+        torrent::QBittorrentApi::load_categories(cats);
+    }
 }
 void save_global_settings() {
+    global_settings["torrentCategories"] = torrent::QBittorrentApi::get_all_categories();
     std::string home = getenv("HOME") ? getenv("HOME") : "/tmp";
     std::ofstream f(home + "/.fluxtorrent/settings.json");
     f << global_settings.dump(4);
@@ -205,7 +214,8 @@ int main() {
                 {"magnet_uri", state.magnet_uri},
                 {"eta", state.eta_seconds},
                 {"paused", state.is_paused},
-                {"done", state.is_finished}
+                {"done", state.is_finished},
+                {"category", torrent::QBittorrentApi::get_torrent_category(state.info_hash)}
             });
         }
         res.set_content(response.dump(), "application/json");
@@ -424,6 +434,7 @@ int main() {
     setup_settings_routes(svr, engine, rss_worker);
     torrent::setup_qbittorrent_routes(svr, engine);
     torrent::setup_subtitle_routes(svr, engine);
+    torrent::setup_transcoder_routes(svr, engine);
 
     // Serve static frontend files (Support both CLI build/ folder and macOS App Resources/ folder)
     if (std::filesystem::exists("./public")) {
@@ -856,5 +867,48 @@ void setup_engine_routes(httplib::Server& svr, torrent::Engine& engine) {
             res.status = 404;
             res.set_content(json{{"status", "error"}, {"message", e.what()}}.dump(), "application/json");
         }
+    });
+
+    // API: Set Category for Specific Torrent
+    svr.Post(R"(/api/torrents/([^/]+)/category)", [](const httplib::Request& req, httplib::Response& res) {
+        std::string info_hash = req.matches[1];
+        try {
+            auto body = json::parse(req.body);
+            std::string category = body.value("category", "");
+            torrent::QBittorrentApi::set_torrent_category(info_hash, category);
+            save_global_settings();
+            json response = {
+                {"status", "success"},
+                {"hash", info_hash},
+                {"category", category}
+            };
+            res.set_content(response.dump(), "application/json");
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content(json{{"status", "error"}, {"message", e.what()}}.dump(), "application/json");
+        }
+    });
+
+    // API: Get All Torrent Categories and Counts
+    svr.Get("/api/categories", [&engine](const httplib::Request&, httplib::Response& res) {
+        auto states = engine.get_all_torrent_states();
+        std::unordered_map<std::string, int> counts;
+        for (const auto& s : states) {
+            std::string cat = torrent::QBittorrentApi::get_torrent_category(s.info_hash);
+            counts[cat]++;
+        }
+        json categories_arr = json::array();
+        for (const auto& [cat, count] : counts) {
+            categories_arr.push_back({
+                {"name", cat.empty() ? "Uncategorized" : cat},
+                {"category", cat},
+                {"count", count}
+            });
+        }
+        json response = {
+            {"categories", categories_arr},
+            {"total", states.size()}
+        };
+        res.set_content(response.dump(), "application/json");
     });
 }

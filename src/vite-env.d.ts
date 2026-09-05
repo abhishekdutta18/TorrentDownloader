@@ -58,6 +58,8 @@ interface Window {
     setSequential: (infoHash: string, sequential: boolean) => Promise<void>
     searchTorrents: (query: string) => Promise<any>
     fetchRss: (url: string) => Promise<any>
+    setCategory?: (hash: string, category: string) => Promise<any>
+    getCategories?: () => Promise<any>
     readClipboard: () => Promise<string>
     scanFile?: (infoHash: string, fileIndex: number) => Promise<{ status: string }>
   }

@@ -1,4 +1,4 @@
-import { X, ExternalLink, Play, AlertCircle, Captions, Search, Download, Check, Loader2, Globe } from 'lucide-react'
+import { X, ExternalLink, Play, AlertCircle, Captions, Search, Download, Check, Loader2, Globe, Cpu } from 'lucide-react'
 import { useEffect, useRef, useCallback, useState } from 'react'
 
 interface VideoPlayerProps {
@@ -29,6 +29,8 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
   const videoRef = useRef<HTMLVideoElement>(null)
   const [hasError, setHasError] = useState(false)
   const [errorDetails, setErrorDetails] = useState<string | null>(null)
+  const [isTranscoding, setIsTranscoding] = useState(false)
+  const [transcoderAvailable, setTranscoderAvailable] = useState<boolean | null>(null)
 
   // Subtitle States
   const [activeTrack, setActiveTrack] = useState<SubtitleTrack | null>(null)
@@ -42,6 +44,9 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
   const [movieHash, setMovieHash] = useState<string>('')
 
   const apiBase = (window.location.port === '5173' || window.location.port === '3000') ? 'http://localhost:8080' : ''
+  const effectiveStreamUrl = isTranscoding && infoHash !== undefined && fileIndex !== undefined
+    ? `${apiBase}/api/stream/${infoHash}/${fileIndex}/transcode`
+    : streamUrl
 
   const handleClose = useCallback(() => {
     if (videoRef.current) {
@@ -103,6 +108,22 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
 
     loadSubtitles()
   }, [infoHash, fileIndex, apiBase, searchLang])
+
+  // Check Transcoder Engine status
+  useEffect(() => {
+    fetch(`${apiBase}/api/transcoder/status`)
+      .then(res => res.json())
+      .then(data => {
+        setTranscoderAvailable(!!data.available)
+      })
+      .catch(() => setTranscoderAvailable(false))
+  }, [apiBase])
+
+  const handleToggleTranscode = () => {
+    setHasError(false)
+    setErrorDetails(null)
+    setIsTranscoding(prev => !prev)
+  }
 
   // Configure text track when active track changes
   useEffect(() => {
@@ -209,6 +230,28 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Transcoding Engine Toggle */}
+            {infoHash !== undefined && fileIndex !== undefined && (
+              <button
+                onClick={handleToggleTranscode}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  isTranscoding 
+                    ? 'bg-amber-500 text-white shadow-xs' 
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                }`}
+                title={
+                  transcoderAvailable === false
+                    ? 'FFmpeg is not detected on host system. Direct playback used.'
+                    : isTranscoding
+                      ? 'Streaming via real-time FFmpeg MP4 Transcoder'
+                      : 'Switch to FFmpeg on-the-fly Transcoding'
+                }
+              >
+                <Cpu size={13} />
+                <span>{isTranscoding ? 'Transcoding' : 'Direct Play'}</span>
+              </button>
+            )}
+
             {/* Subtitles Button & Popover */}
             <div className="relative">
               <button
@@ -315,18 +358,33 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
                   </p>
                 )}
               </div>
-              <button
-                onClick={handleOpenInSystemPlayer}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-md inline-flex items-center gap-2 cursor-pointer"
-              >
-                <Play size={14} className="fill-current" />
-                <span>Open in VLC / System Player</span>
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {!isTranscoding && infoHash !== undefined && fileIndex !== undefined && (
+                  <button
+                    onClick={() => {
+                      setHasError(false)
+                      setErrorDetails(null)
+                      setIsTranscoding(true)
+                    }}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition shadow-md inline-flex items-center gap-2 cursor-pointer"
+                  >
+                    <Cpu size={14} />
+                    <span>Transcode to MP4</span>
+                  </button>
+                )}
+                <button
+                  onClick={handleOpenInSystemPlayer}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-md inline-flex items-center gap-2 cursor-pointer"
+                >
+                  <Play size={14} className="fill-current" />
+                  <span>Open in VLC / System Player</span>
+                </button>
+              </div>
             </div>
           ) : (
             <video
               ref={videoRef}
-              src={streamUrl}
+              src={effectiveStreamUrl}
               controls
               autoPlay
               playsInline
@@ -340,8 +398,8 @@ export function VideoPlayer({ streamUrl, title, infoHash, fileIndex, onClose }: 
                   4: 'MEDIA_ERR_SRC_NOT_SUPPORTED'
                 }
                 const msg = err ? `${codeMap[err.code] || 'UNKNOWN'} (code ${err.code}): ${err.message}` : 'Unknown video error'
-                console.error("Video element error:", msg, streamUrl)
-                setErrorDetails(`${msg} | URL: ${streamUrl}`)
+                console.error("Video element error:", msg, effectiveStreamUrl)
+                setErrorDetails(`${msg} | URL: ${effectiveStreamUrl}`)
                 setHasError(true)
               }}
               className="w-full h-full object-contain"

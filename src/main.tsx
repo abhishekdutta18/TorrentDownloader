@@ -182,7 +182,8 @@ window.torrentApi = {
       uploaded: t.uploaded || 0,
       path: t.save_path || '',
       magnetURI: t.magnet_uri || `magnet:?xt=urn:btih:${t.hash}`,
-      timeRemaining: t.eta || 0
+      timeRemaining: t.eta || 0,
+      category: t.category || ''
     }));
 
     if (hash) {
@@ -241,6 +242,19 @@ window.torrentApi = {
   },
   removeTorrent: async (hash: string) => {
     await fetch(`${getBase()}/api/torrents/${hash}`, { method: 'DELETE' });
+  },
+  setCategory: async (hash: string, category: string) => {
+    const res = await fetch(`${getBase()}/api/torrents/${hash}/category`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category })
+    });
+    return await res.json();
+  },
+  getCategories: async () => {
+    const res = await fetch(`${getBase()}/api/categories`);
+    if (res.ok) return await res.json();
+    return { categories: [], total: 0 };
   },
   openFolder: async (pathOrHash: string) => {
     try {

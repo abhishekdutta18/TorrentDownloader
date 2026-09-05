@@ -18,7 +18,7 @@ FetchContent_MakeAvailable(Catch2)
 find_package(LibtorrentRasterbar REQUIRED)
 find_package(OpenSSL REQUIRED)
 
-add_library(torrent_engine src/engine.cpp src/rss_worker.cpp src/search.cpp src/security.cpp src/media_ai.cpp src/qbittorrent_api.cpp src/subtitles.cpp)
+add_library(torrent_engine src/engine.cpp src/rss_worker.cpp src/search.cpp src/security.cpp src/media_ai.cpp src/qbittorrent_api.cpp src/subtitles.cpp src/transcoder.cpp)
 target_link_libraries(torrent_engine PUBLIC LibtorrentRasterbar::torrent-rasterbar OpenSSL::SSL OpenSSL::Crypto)
 
 if(APPLE)
@@ -31,7 +31,7 @@ target_compile_definitions(torrent_engine PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT)
 add_executable(torrent_client src/main.cpp)
 target_link_libraries(torrent_client PRIVATE torrent_engine)
 
-add_executable(torrent_tests tests/test_engine.cpp tests/test_search.cpp tests/test_security.cpp tests/test_media_ai.cpp tests/test_qbittorrent_api.cpp tests/test_subtitles.cpp)
+add_executable(torrent_tests tests/test_engine.cpp tests/test_search.cpp tests/test_security.cpp tests/test_media_ai.cpp tests/test_qbittorrent_api.cpp tests/test_subtitles.cpp tests/test_transcoder.cpp)
 target_link_libraries(torrent_tests PRIVATE torrent_engine Catch2::Catch2WithMain)
 
 include(CTest)

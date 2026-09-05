@@ -603,6 +603,90 @@
             "description": "Removes the torrent from libtorrent session with optional deletion of downloaded files from disk."
           },
           "response": []
+        },
+        {
+          "name": "Set Torrent Category",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 400\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"category\": \"movies\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/torrents/{{torrentHash}}/category",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "torrents",
+                "{{torrentHash}}",
+                "category"
+              ]
+            },
+            "description": "Associates a torrent with an automation or organization category (e.g. movies, tv, sonarr, radarr)."
+          },
+          "response": []
+        },
+        {
+          "name": "List All Categories",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Categories array returned\", function () {",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data).to.have.property('categories');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories"
+              ]
+            },
+            "description": "Retrieves aggregated category statistics across all active torrent swarms."
+          },
+          "response": []
         }
       ]
     },
@@ -852,6 +936,48 @@
               ]
             },
             "description": "High-throughput sequential HTTP streaming endpoint with chunked byte-range support for video and audio playback."
+          },
+          "response": []
+        },
+        {
+          "name": "Check Transcoder Availability",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Transcoder status payload has available field\", function () {",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data).to.have.property('available');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transcoder/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transcoder",
+                "status"
+              ]
+            },
+            "description": "Checks whether FFmpeg is detected on the host system to enable real-time transcoded video streaming."
           },
           "response": []
         }
@@ -1819,6 +1945,58 @@
               ]
             },
             "description": "Resumes specified torrent hashes or all torrents."
+          },
+          "response": []
+        },
+        {
+          "name": "qBittorrent Set Category",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 400\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "hashes",
+                  "value": "{{torrentHash}}"
+                },
+                {
+                  "key": "category",
+                  "value": "radarr"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/torrents/setCategory",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "torrents",
+                "setCategory"
+              ]
+            },
+            "description": "qBittorrent Web API v2 setCategory compatibility endpoint utilized by Sonarr and Radarr."
           },
           "response": []
         },

@@ -43,6 +43,34 @@ std::vector<std::string> QBittorrentApi::parse_hashes_param(const std::string& h
     return hashes;
 }
 
+static std::unordered_map<std::string, std::string> s_torrent_categories;
+static std::mutex s_category_mutex;
+
+void QBittorrentApi::set_torrent_category(const std::string& hash, const std::string& category) {
+    std::lock_guard<std::mutex> lock(s_category_mutex);
+    if (category.empty()) {
+        s_torrent_categories.erase(hash);
+    } else {
+        s_torrent_categories[hash] = category;
+    }
+}
+
+std::string QBittorrentApi::get_torrent_category(const std::string& hash) {
+    std::lock_guard<std::mutex> lock(s_category_mutex);
+    auto it = s_torrent_categories.find(hash);
+    return (it != s_torrent_categories.end()) ? it->second : "";
+}
+
+std::unordered_map<std::string, std::string> QBittorrentApi::get_all_categories() {
+    std::lock_guard<std::mutex> lock(s_category_mutex);
+    return s_torrent_categories;
+}
+
+void QBittorrentApi::load_categories(const std::unordered_map<std::string, std::string>& categories) {
+    std::lock_guard<std::mutex> lock(s_category_mutex);
+    s_torrent_categories = categories;
+}
+
 json QBittorrentApi::format_torrent_info(const TorrentState& state, const std::string& category) {
     int64_t amount_left = std::max<int64_t>(0, state.total_wanted - state.total_done);
     double ratio = state.total_done > 0 ? static_cast<double>(state.total_upload) / state.total_done : 0.0;
@@ -161,7 +189,10 @@ void QBittorrentApi::setup_routes(httplib::Server& svr, Engine& engine) {
             if (filter == "active" && st.download_rate == 0 && st.upload_rate == 0) continue;
             if (filter == "inactive" && (st.download_rate > 0 || st.upload_rate > 0)) continue;
 
-            torrents_array.push_back(format_torrent_info(st, category));
+            std::string cat = get_torrent_category(st.info_hash);
+            if (!category.empty() && cat != category) continue;
+
+            torrents_array.push_back(format_torrent_info(st, cat));
         }
 
         res.set_content(torrents_array.dump(), "application/json");
@@ -203,6 +234,9 @@ void QBittorrentApi::setup_routes(httplib::Server& svr, Engine& engine) {
                     if (line.empty()) continue;
 
                     std::string hash = engine.add_magnet_link(line, save_path);
+                    if (!category.empty()) {
+                        set_torrent_category(hash, category);
+                    }
                     if (paused) {
                         engine.pause_torrent(hash);
                     }
@@ -220,6 +254,9 @@ void QBittorrentApi::setup_routes(httplib::Server& svr, Engine& engine) {
 
                     try {
                         std::string hash = engine.add_torrent_file(temp_path, save_path);
+                        if (!category.empty()) {
+                            set_torrent_category(hash, category);
+                        }
                         if (paused) {
                             engine.pause_torrent(hash);
                         }
@@ -233,6 +270,18 @@ void QBittorrentApi::setup_routes(httplib::Server& svr, Engine& engine) {
             res.status = 400;
             res.set_content(e.what(), "text/plain");
         }
+    });
+
+    // 6. Set category for torrents
+    svr.Post("/api/v2/torrents/setCategory", [](const httplib::Request& req, httplib::Response& res) {
+        std::string hashes_param = req.has_param("hashes") ? req.get_param_value("hashes") : "";
+        std::string category = req.has_param("category") ? req.get_param_value("category") : "";
+        auto hashes = parse_hashes_param(hashes_param);
+        for (const auto& h : hashes) {
+            set_torrent_category(h, category);
+        }
+        res.status = 200;
+        res.set_content("", "text/plain");
     });
 
     // 6. Pause torrents
