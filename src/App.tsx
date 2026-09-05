@@ -183,8 +183,8 @@ function App() {
   }, [menuAnchor])
 
   useEffect(() => {
-    // Poll for torrents status every second
-    const interval = setInterval(async () => {
+    // Poll for torrents status immediately on mount and every second
+    const fetchStatus = async () => {
       try {
         if (window.torrentApi) {
           const status = await window.torrentApi.getTorrentsStatus(inspectorHashRef.current || undefined)
@@ -231,7 +231,10 @@ function App() {
       } catch (err) {
         console.error("Failed to fetch torrents", err)
       }
-    }, 1000)
+    }
+
+    fetchStatus()
+    const interval = setInterval(fetchStatus, 1000)
 
     let cleanupClipboard: (() => void) | undefined
     if (window.torrentApi && window.torrentApi.onClipboardMagnet) {

@@ -10,6 +10,7 @@ export default defineConfig({
     react()
   ],
   test: {
+    globals: true,
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}']
   },
